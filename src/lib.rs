@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ops::Not;
 use std::rc::{Rc, Weak};
 
 use thiserror::Error;
@@ -26,6 +27,12 @@ pub enum AigError {
     /// Invalid operation on a node which should be an AND gate but is not.
     #[error("the node is not an AND gate")]
     NotAndGate,
+
+    /// The AIG has reached an invalid state. This should never happen.
+    /// For example, when tracking the nodes internally with the hashmap nodes,
+    /// node `nodes[id]` should have id `id`. If this error is raised, my code is garbage.
+    #[error("the AIG has reached an invalid state - this should not happen")]
+    InvalidState,
 }
 
 /// Unambiguous fanin selector.
@@ -37,7 +44,7 @@ pub enum FaninId {
 /// A directed edge representing a fanin for AIG nodes.
 ///
 /// The edge can carry an inverter according to the value of `complement`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AigEdge {
     /// The node the edge is refering to.
     /// It is wrapped in Rc<RefCell<_>> to allow multiple nodes refering to it.
@@ -46,15 +53,30 @@ pub struct AigEdge {
     complement: bool,
 }
 
+impl Not for AigEdge {
+    type Output = Self;
+
+    fn not(mut self) -> Self::Output {
+        self.complement = !self.complement;
+        self
+    }
+}
+
 /// An AIG node.
 ///
 /// Each node has an id. By convention, id for constant node `False` is 0. The id must be unique.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum AigNode {
     /// The constant low/false signal.
     False,
     /// A primary input.
     Input(NodeId),
+    /// A latch (for sequential circuits).
+    Latch {
+        id: NodeId,
+        next: AigEdge,
+        init: Option<bool>,
+    },
     /// An AND gate with two fanins.
     And {
         id: NodeId,
@@ -74,6 +96,7 @@ impl AigNode {
         match *self {
             AigNode::False => 0,
             AigNode::Input(id) => id,
+            AigNode::Latch { id, .. } => id,
             AigNode::And { id, .. } => id,
         }
     }
@@ -89,6 +112,7 @@ impl AigNode {
 
 pub struct Aig {
     nodes: HashMap<NodeId, AigNodeWeak>,
+    outputs: HashMap<NodeId, AigNodeRef>,
     keep_nodes_alive: Vec<AigNodeRef>,
 }
 
@@ -96,17 +120,28 @@ impl Aig {
     pub fn new() -> Self {
         Aig {
             nodes: HashMap::new(),
+            outputs: HashMap::new(),
             keep_nodes_alive: Vec::new(),
         }
     }
 
+    /// Retrieves a node from its id
+    pub fn get_node(&self, id: NodeId) -> Option<AigNodeRef> {
+        self.nodes.get(&id)?.upgrade()
+    }
+
     pub fn update(&mut self) {
+        // Stop keeping nodes artificially alive
         self.keep_nodes_alive.clear();
+
+        // Removing no longer valid entries from the nodes
+        self.nodes
+            .retain(|_, weak_node| weak_node.upgrade().is_some());
     }
 
     /// Create a new (or retrieve existing) node within the AIG.
     /// This will fail if a different node with the same id already exists in the AIG.
-    pub fn add_node(&mut self, node: AigNode) -> Result<AigNodeRef> {
+    fn add_node(&mut self, node: AigNode) -> Result<AigNodeRef> {
         let id = node.get_id();
         match self.get_node(id) {
             // No node with this id, let's create a new one
@@ -127,9 +162,24 @@ impl Aig {
         }
     }
 
-    /// Retrieves a node from its id
-    pub fn get_node(&self, id: NodeId) -> Option<AigNodeRef> {
-        self.nodes.get(&id)?.upgrade()
+    /// Create a new and node (or retrieve it if the exact same node already exists).
+    pub fn new_and(&mut self, id: NodeId, fanin0: AigEdge, fanin1: AigEdge) -> Result<AigNodeRef> {
+        let candidate = AigNode::And { id, fanin0, fanin1 };
+        self.add_node(candidate)
+    }
+
+    /// Mark an existing node as an output.
+    pub fn add_output(&mut self, id: NodeId) -> Result<()> {
+        let node = self.get_node(id).ok_or(AigError::NodeDoesNotExist(id))?;
+        self.outputs.insert(id, node);
+        Ok(())
+    }
+
+    /// Remove a node from the outputs. Do not error if node does not exist or was not an output,
+    /// simply returns None instead of the node.
+    pub fn remove_output(&mut self, id: NodeId) -> Option<AigNodeRef> {
+        let node = self.get_node(id)?;
+        self.outputs.remove(&node.borrow().get_id())
     }
 
     /// Replace the given fanin of a node by a new fanin
@@ -155,11 +205,68 @@ impl Aig {
 
         parent.borrow_mut().set_fanin(&fanin, fanin_id)
     }
+
+    /// Checking if the AIG structure is correct.
+    /// This function was written for debug purposes, as the library is supposed to maintain
+    /// integrity of the AIG at any moment.
+    pub fn check_integrity(&self) -> Result<()> {
+        // Checking that all nodes have relevant id
+        for (&id, weak_node) in &self.nodes {
+            if let Some(node) = weak_node.upgrade() {
+                if node.borrow().get_id() != id {
+                    return Err(AigError::InvalidState);
+                }
+            }
+        }
+
+        // Checking that all outputs are registered as nodes
+        for (&id, _) in &self.outputs {
+            if self.get_node(id).is_none() {
+                return Err(AigError::InvalidState);
+            }
+        }
+
+        // TODO more sophisticated checks
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edge_eq() {
+        let node = AigNode::False;
+        let noderef = Rc::new(RefCell::new(node));
+
+        // Checking expected equality
+        let e1 = AigEdge {
+            node: noderef.clone(),
+            complement: false,
+        };
+        let e2 = AigEdge {
+            node: noderef.clone(),
+            complement: false,
+        };
+        assert_eq!(e1, e2);
+
+        let new_node = AigNode::Input(1);
+        let new_noderef = Rc::new(RefCell::new(new_node));
+        let e3 = AigEdge {
+            node: new_noderef.clone(),
+            complement: false,
+        };
+        assert_eq!(e1, e3);
+
+        // Checking Not implementation
+        let e4 = AigEdge {
+            node: noderef.clone(),
+            complement: true,
+        };
+        assert_ne!(e1, e4);
+        assert_eq!(e1, !e4);
+    }
 
     #[test]
     fn node_lifetime() {
