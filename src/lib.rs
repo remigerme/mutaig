@@ -88,7 +88,7 @@ pub enum AigNode {
 /// A wrapper for AIG nodes to allow multiple references to it.
 pub type AigNodeRef = Rc<RefCell<AigNode>>;
 
-/// A non-counting reference to an AIG node - used internally
+/// A non-counting reference to an AIG node - used internally.
 type AigNodeWeak = Weak<RefCell<AigNode>>;
 
 impl AigNode {
@@ -110,6 +110,21 @@ impl AigNode {
     }
 }
 
+/// A whole AIG.
+///
+/// Nodes are kept alive artificially to allow rewrites of the structure.
+/// Once you are done with rewriting (ie, your AIG should now be in a relevant state), you can
+/// call the [`.update()`] method to remove all unused nodes.
+///
+/// For example, if you just created a node using [`.new_and(id, fanin0, fanin1)`], this node isn't used as a fanin to any
+/// other node for now. It won't be deleted directly (fortunately!). But if after finishing your rewrite you
+/// call [`.update()`] and the node still is not used by any other node, then, it will get deleted.
+///
+/// [`.update()`]: Aig::update
+/// [`.new_and(id, fanin0, fanin1)`]: Aig::new_and
+///
+/// The use of `Rc` allows us not to worry about having to drop manually nodes that are no longer used, eg.
+/// nodes that were used before by node `A` as their `fanin0`, but `A` is rewritten to use another `fanin0`.
 pub struct Aig {
     nodes: HashMap<NodeId, AigNodeWeak>,
     outputs: HashMap<NodeId, AigNodeRef>,
@@ -117,6 +132,7 @@ pub struct Aig {
 }
 
 impl Aig {
+    /// Create a brand new (and empty) AIG.
     pub fn new() -> Self {
         Aig {
             nodes: HashMap::new(),
@@ -125,11 +141,13 @@ impl Aig {
         }
     }
 
-    /// Retrieves a node from its id
+    /// Retrieves a node from its id.
     pub fn get_node(&self, id: NodeId) -> Option<AigNodeRef> {
         self.nodes.get(&id)?.upgrade()
     }
 
+    /// Call this function when you are done with your rewrite.
+    /// All nodes that are not part of the AIG anymore (ie not reachable from an output) will be deleted.
     pub fn update(&mut self) {
         // Stop keeping nodes artificially alive
         self.keep_nodes_alive.clear();
@@ -211,11 +229,14 @@ impl Aig {
     /// integrity of the AIG at any moment.
     pub fn check_integrity(&self) -> Result<()> {
         // Checking that all nodes have relevant id
+        // and perform some individual integrity checks
         for (&id, weak_node) in &self.nodes {
             if let Some(node) = weak_node.upgrade() {
                 if node.borrow().get_id() != id {
                     return Err(AigError::InvalidState);
                 }
+
+                self.check_node_integrity(node)?;
             }
         }
 
@@ -227,6 +248,46 @@ impl Aig {
         }
 
         // TODO more sophisticated checks
+        // notably acylicity (warning, latches)
+        Ok(())
+    }
+
+    /// Check the integrity for an individual node, that is:
+    /// - check that only `False` have id 0
+    /// - check that fanins (`AigEdge`) for latch and and gate are valid too
+    ///   (ie they refer to a known node for this AIG)
+    fn check_node_integrity(&self, node: AigNodeRef) -> Result<()> {
+        match &*node.borrow() {
+            AigNode::False => {
+                if node.borrow().get_id() != 0 {
+                    return Err(AigError::InvalidState);
+                }
+            }
+            AigNode::Input(id) => {
+                if *id == 0 {
+                    return Err(AigError::InvalidState);
+                }
+            }
+            AigNode::Latch { id, next, .. } => {
+                if *id == 0 {
+                    return Err(AigError::InvalidState);
+                }
+                self.check_edge_integrity(next)?;
+            }
+            AigNode::And { id, fanin0, fanin1 } => {
+                if *id == 0 {
+                    return Err(AigError::InvalidState);
+                }
+                self.check_edge_integrity(fanin0)?;
+                self.check_edge_integrity(fanin1)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn check_edge_integrity(&self, fanin: &AigEdge) -> Result<()> {
+        self.get_node(fanin.node.borrow().get_id())
+            .ok_or(AigError::InvalidState)?;
         Ok(())
     }
 }
