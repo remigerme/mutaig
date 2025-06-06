@@ -1,7 +1,11 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::ops::Not;
-use std::rc::{Rc, Weak};
+pub mod cnf;
+
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    ops::Not,
+    rc::{Rc, Weak},
+};
 
 use thiserror::Error;
 
