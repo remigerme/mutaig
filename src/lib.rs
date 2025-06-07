@@ -1,4 +1,6 @@
 pub mod cnf;
+pub mod dfs;
+pub mod miter;
 
 use std::{
     cell::RefCell,
@@ -102,6 +104,14 @@ impl AigNode {
             AigNode::Input(id) => id,
             AigNode::Latch { id, .. } => id,
             AigNode::And { id, .. } => id,
+        }
+    }
+
+    fn get_fanins(&self) -> Vec<AigNodeRef> {
+        match self {
+            AigNode::Latch { next, .. } => vec![next.node.clone()],
+            AigNode::And { fanin0, fanin1, .. } => vec![fanin0.node.clone(), fanin1.node.clone()],
+            _ => vec![],
         }
     }
 
