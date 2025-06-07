@@ -9,7 +9,7 @@
 
 use std::{num::TryFromIntError, ops::Not};
 
-use crate::{Aig, AigEdge, AigNode, NodeId};
+use crate::{AigEdge, AigNode, NodeId};
 
 /// A SAT literal.
 ///
@@ -79,6 +79,11 @@ impl TryFrom<&AigNode> for LitRes {
 pub struct Clause(Vec<Lit>);
 
 impl Clause {
+    /// A new empty clause.
+    pub fn new() -> Self {
+        Clause(Vec::new())
+    }
+
     /// Returns the true SAT clause once we got rid of `True` and `False` literals.
     /// If there is a `True`, then the Clause is obviously satisfied, so we return None.
     /// `False` literals are omitted, and real literals are added to the clause.
@@ -118,6 +123,11 @@ impl From<Vec<Lit>> for Clause {
 pub struct Cnf(Vec<Clause>);
 
 impl Cnf {
+    /// A new empty CNF.
+    pub fn new() -> Self {
+        Cnf(Vec::new())
+    }
+
     /// Add the given clause to the CNF.
     pub fn add_clause(&mut self, clause: Clause) {
         self.0.push(clause);
@@ -127,6 +137,24 @@ impl Cnf {
     pub fn add_clause_if(&mut self, clause: Option<Clause>) {
         if let Some(c) = clause {
             self.add_clause(c);
+        }
+    }
+
+    /// Add clauses induced by the node.
+    fn add_clauses(&mut self, node: &AigNode) {
+        match node {
+            AigNode::And { id, fanin0, fanin1 } => {
+                let a = fanin0.get_literal_res();
+                let b = fanin1.get_literal_res();
+                let z = LitRes::from(Lit::try_from(*id).unwrap());
+
+                self.add_clause_if(Clause::from_lit_res(vec![a, !z]));
+                self.add_clause_if(Clause::from_lit_res(vec![b, !z]));
+                self.add_clause_if(Clause::from_lit_res(vec![!a, !b, z]));
+            }
+            // The other nodes do not induce any clause, they only generate literals
+            // TODO : what about latches (depending on their initialization status)
+            _ => (),
         }
     }
 
@@ -162,24 +190,3 @@ impl AigEdge {
         if self.complement { !lit } else { lit }
     }
 }
-
-impl AigNode {
-    fn add_clauses(&self, cnf: &mut Cnf) {
-        match self {
-            AigNode::And { id, fanin0, fanin1 } => {
-                let a = fanin0.get_literal_res();
-                let b = fanin1.get_literal_res();
-                let z = LitRes::from(Lit::try_from(*id).unwrap());
-
-                cnf.add_clause_if(Clause::from_lit_res(vec![a, !z]));
-                cnf.add_clause_if(Clause::from_lit_res(vec![b, !z]));
-                cnf.add_clause_if(Clause::from_lit_res(vec![!a, !b, z]));
-            }
-            // The other nodes do not induce any clause, they only generate literals
-            // TODO : what about latches (depending on their initialization status)
-            _ => (),
-        }
-    }
-}
-
-impl Aig {}
