@@ -11,12 +11,13 @@
 //! Example:
 //!
 //! ```rust
-//! let aig = Aig::new();
-//! ...
-//! let dfs = Dfs::from_outputs(&aig);
+//! use mutaig::{Aig, dfs::Dfs};
+//! let mut aig = Aig::new();
+//! // You can modify the aig here
+//! let mut dfs = Dfs::from_outputs(&aig);
 //! while let Some(noderef) = dfs.next(&aig) {
-//!     // You can borrow mut aig here!
-//!     ...
+//!     // You can still borrow mut aig here!
+//!     // ...
 //! }
 //! ```
 //!
@@ -113,5 +114,146 @@ impl Dfs {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{Aig, AigEdge, AigNode};
+
+    #[test]
+    fn from_node_test() {
+        // Constructing the AIG
+        let mut aig = Aig::new();
+        let n0 = aig.add_node(AigNode::False).unwrap();
+        let n1 = aig.add_node(AigNode::Input(1)).unwrap();
+        let n2 = aig
+            .add_node(AigNode::And {
+                id: 2,
+                fanin0: AigEdge::new(n0.clone(), false),
+                fanin1: AigEdge::new(n1.clone(), false),
+            })
+            .unwrap();
+
+        // Now using the DFS
+        let mut dfs = Dfs::from_node(&*n2.borrow());
+        assert_eq!(dfs.next(&aig).unwrap(), n2.clone()); // first node is known
+        let n = dfs.next(&aig).unwrap(); // second node could be either one of its child
+        if n == n0.clone() {
+            assert_eq!(dfs.next(&aig).unwrap(), n1.clone());
+        } else if n == n1.clone() {
+            assert_eq!(dfs.next(&aig).unwrap(), n0.clone());
+        } else {
+            panic!("Test failed.");
+        }
+        // Now there shouldn't be anything
+        assert!(dfs.next(&aig).is_none());
+        assert!(dfs.next(&aig).is_none());
+        assert!(dfs.next(&aig).is_none());
+    }
+
+    #[test]
+    fn from_outputs_test() {
+        // Creating the AIG
+        let mut aig = Aig::new();
+        let n0 = aig.add_node(AigNode::False).unwrap();
+        let n1 = aig.add_node(AigNode::Input(1)).unwrap();
+        let n2 = aig
+            .add_node(AigNode::And {
+                id: 2,
+                fanin0: AigEdge::new(n0.clone(), false),
+                fanin1: AigEdge::new(n1.clone(), false),
+            })
+            .unwrap();
+        let n3 = aig.add_node(AigNode::Input(3)).unwrap();
+        let n4 = aig
+            .add_node(AigNode::And {
+                id: 4,
+                fanin0: AigEdge::new(n2.clone(), false),
+                fanin1: AigEdge::new(n3.clone(), false),
+            })
+            .unwrap();
+        aig.add_output(2).unwrap();
+        aig.add_output(4).unwrap();
+
+        // Let's use the AIG - we have so many possible and equally valid DFS :')
+        let mut dfs = Dfs::from_outputs(&aig);
+        let n = dfs.next(&aig).unwrap();
+        // If we start by n2
+        if n == n2.clone() {
+            // Processing n2 fanin
+            let n = dfs.next(&aig).unwrap();
+            if n == n0.clone() {
+                assert_eq!(dfs.next(&aig).unwrap(), n1.clone());
+            } else if n == n1.clone() {
+                assert_eq!(dfs.next(&aig).unwrap(), n0.clone());
+            } else {
+                panic!("Test failed.");
+            }
+
+            // Processing n4 fanin
+            assert_eq!(dfs.next(&aig).unwrap(), n4.clone());
+            assert_eq!(dfs.next(&aig).unwrap(), n3.clone());
+        }
+        // Else we start by n4
+        else if n == n4.clone() {
+            let n = dfs.next(&aig).unwrap();
+            // If we start by n2
+            if n == n2.clone() {
+                // We start by processing n2 fanin
+                let n = dfs.next(&aig).unwrap();
+                if n == n0.clone() {
+                    assert_eq!(dfs.next(&aig).unwrap(), n1.clone());
+                } else if n == n1.clone() {
+                    assert_eq!(dfs.next(&aig).unwrap(), n0.clone());
+                } else {
+                    panic!("Test failed.");
+                }
+
+                // Then we must process n3
+                assert_eq!(dfs.next(&aig).unwrap(), n3.clone());
+            }
+            // Else we start by n3
+            else if n == n3.clone() {
+                // Then we must handle n2 fanin
+                assert_eq!(dfs.next(&aig).unwrap(), n2.clone());
+                let n = dfs.next(&aig).unwrap();
+                if n == n0.clone() {
+                    assert_eq!(dfs.next(&aig).unwrap(), n1.clone());
+                } else if n == n1.clone() {
+                    assert_eq!(dfs.next(&aig).unwrap(), n0.clone());
+                } else {
+                    panic!("Test failed.");
+                }
+            } else {
+                panic!("Test failed.");
+            }
+        } else {
+            panic!("Test failed.")
+        }
+
+        // Now the DFS should be done
+        assert!(dfs.next(&aig).is_none());
+        assert!(dfs.next(&aig).is_none());
+        assert!(dfs.next(&aig).is_none());
+    }
+
+    #[test]
+    fn repeated_node() {
+        let mut aig = Aig::new();
+        let n0 = aig.add_node(AigNode::Input(1)).unwrap();
+        let n1 = aig.add_node(AigNode::Input(1)).unwrap();
+        let n2 = aig
+            .add_node(AigNode::And {
+                id: 2,
+                fanin0: AigEdge::new(n0.clone(), false),
+                fanin1: AigEdge::new(n1.clone(), true),
+            })
+            .unwrap();
+        let mut dfs = Dfs::from_node(&*n2.borrow());
+        assert_eq!(dfs.next(&aig).unwrap(), n2.clone());
+        assert_eq!(dfs.next(&aig).unwrap(), n1.clone());
+        assert!(dfs.next(&aig).is_none());
     }
 }
