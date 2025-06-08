@@ -26,6 +26,10 @@ pub enum AigError {
     #[error("a different node with id={0} already exists")]
     DuplicateId(NodeId),
 
+    /// The id 0 is reserved for the `False` constant node only.
+    #[error("id=0 is for node False only")]
+    IdZeroButNotFalse,
+
     /// The node with given id does not exist.
     #[error("node with id={0} does not exist")]
     NodeDoesNotExist(NodeId),
@@ -42,6 +46,7 @@ pub enum AigError {
 }
 
 /// Unambiguous fanin selector.
+#[derive(Debug, Clone, Copy)]
 pub enum FaninId {
     Fanin0,
     Fanin1,
@@ -68,10 +73,16 @@ impl Not for AigEdge {
     }
 }
 
+impl AigEdge {
+    pub fn new(node: AigNodeRef, complement: bool) -> Self {
+        AigEdge { node, complement }
+    }
+}
+
 /// An AIG node.
 ///
 /// Each node has an id. By convention, id for constant node `False` is 0. The id must be unique.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AigNode {
     /// The constant low/false signal.
     False,
@@ -172,9 +183,15 @@ impl Aig {
     }
 
     /// Create a new (or retrieve existing) node within the AIG.
-    /// This will fail if a different node with the same id already exists in the AIG.
+    /// This will fail if a different node with the same id already exists in the AIG,
+    /// or if a node uses id 0 (reserved for constant node `False`).
     fn add_node(&mut self, node: AigNode) -> Result<AigNodeRef> {
         let id = node.get_id();
+
+        if id == 0 && !matches!(node, AigNode::False) {
+            return Err(AigError::IdZeroButNotFalse);
+        }
+
         match self.get_node(id) {
             // No node with this id, let's create a new one
             None => {
@@ -307,8 +324,48 @@ impl Aig {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
+
+    #[test]
+    fn add_node_test() {
+        let mut aig = Aig::new();
+
+        // Id 0 is reserved for node false
+        // Even if aig is empty!
+        assert!(aig.add_node(AigNode::Input(0)).is_err());
+
+        // Adding legit nodes
+        let nf = AigNode::False;
+        let rnf = aig.add_node(nf.clone()).unwrap();
+        assert_eq!(*rnf.borrow(), nf);
+        let i1 = AigNode::Input(1);
+        let ri1 = aig.add_node(i1.clone()).unwrap();
+        assert_eq!(*ri1.borrow(), i1);
+        let a2 = AigNode::And {
+            id: 2,
+            fanin0: AigEdge::new(rnf.clone(), false),
+            fanin1: AigEdge::new(ri1.clone(), false),
+        };
+        let ra2 = aig.add_node(a2.clone()).unwrap();
+        assert_eq!(*ra2.borrow(), a2);
+
+        // Now, trying to add some illegal nodes
+        assert!(aig.add_node(AigNode::Input(2)).is_err());
+        assert!(
+            aig.add_node(AigNode::And {
+                id: 1,
+                fanin0: AigEdge::new(rnf.clone(), false),
+                fanin1: AigEdge::new(rnf.clone(), false)
+            })
+            .is_err()
+        );
+
+        // Trying to re-add existing nodes (legal)
+        assert_eq!(*aig.add_node(nf.clone()).unwrap().borrow(), nf);
+        assert_eq!(*aig.add_node(i1.clone()).unwrap().borrow(), i1);
+        assert_eq!(*aig.add_node(a2.clone()).unwrap().borrow(), a2);
+    }
 
     #[test]
     fn edge_eq() {
@@ -332,7 +389,7 @@ mod tests {
             node: new_noderef.clone(),
             complement: false,
         };
-        assert_eq!(e1, e3);
+        assert_ne!(e1, e3);
 
         // Checking Not implementation
         let e4 = AigEdge {
@@ -347,13 +404,37 @@ mod tests {
     fn node_lifetime() {
         let mut aig = Aig::new();
 
-        {
-            let node = AigNode::False;
-            aig.add_node(node).unwrap();
-        }
-        assert!(aig.get_node(0).is_some());
-
+        // Manipulating the AIG without saving output
+        assert_eq!(
+            *aig.add_node(AigNode::False).unwrap().borrow(),
+            AigNode::False
+        );
+        assert_eq!(*aig.get_node(0).unwrap().borrow(), AigNode::False);
         aig.update();
         assert!(aig.get_node(0).is_none());
+
+        // Now let's save the output
+        assert_eq!(
+            *aig.add_node(AigNode::False).unwrap().borrow(),
+            AigNode::False
+        );
+        assert_eq!(
+            *aig.add_node(AigNode::Input(1)).unwrap().borrow(),
+            AigNode::Input(1)
+        );
+        let a2 = AigNode::And {
+            id: 2,
+            fanin0: AigEdge::new(aig.get_node(0).unwrap(), false),
+            fanin1: AigEdge::new(aig.get_node(1).unwrap(), false),
+        };
+        assert_eq!(*aig.add_node(a2.clone()).unwrap().borrow(), a2);
+        assert_eq!(*aig.get_node(0).unwrap().borrow(), AigNode::False);
+        assert_eq!(*aig.get_node(1).unwrap().borrow(), AigNode::Input(1));
+        assert_eq!(*aig.get_node(2).unwrap().borrow(), a2);
+        assert!(aig.add_output(2).is_ok());
+        aig.update();
+        assert_eq!(*aig.get_node(0).unwrap().borrow(), AigNode::False);
+        assert_eq!(*aig.get_node(1).unwrap().borrow(), AigNode::Input(1));
+        assert_eq!(*aig.get_node(2).unwrap().borrow(), a2);
     }
 }
