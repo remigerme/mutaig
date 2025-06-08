@@ -20,7 +20,7 @@ use crate::{AigEdge, AigNode, NodeId};
 /// are obviously true and don't need to be emitted.
 ///
 /// These cases are handled by the internal `LitRes` data structure.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lit(i64);
 
 impl Not for Lit {
@@ -39,7 +39,7 @@ impl TryFrom<NodeId> for Lit {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LitRes {
     False,
     True,
@@ -76,6 +76,7 @@ impl TryFrom<&AigNode> for LitRes {
 }
 
 /// A SAT clause.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clause(Vec<Lit>);
 
 impl Clause {
@@ -120,6 +121,7 @@ impl From<Vec<Lit>> for Clause {
 ///
 /// [`add_xor`]: Cnf::add_xor
 /// [`add_or_whose_output_is_true`]: Cnf::add_or_whose_output_is_true
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cnf(Vec<Clause>);
 
 impl Cnf {
@@ -188,5 +190,60 @@ impl AigEdge {
     fn get_literal_res(&self) -> LitRes {
         let lit = LitRes::try_from(&*self.node.borrow()).unwrap();
         if self.complement { !lit } else { lit }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn not_lit_test() {
+        let l1 = Lit(1);
+        assert_eq!(!l1, Lit(-1));
+    }
+
+    #[test]
+    fn not_lit_res_test() {
+        let ltrue = LitRes::True;
+        let lfalse = LitRes::False;
+        let l1 = LitRes::Lit(Lit(1));
+        assert_eq!(!lfalse, ltrue);
+        assert_eq!(!l1, LitRes::Lit(!Lit(1)));
+    }
+
+    #[test]
+    fn clause_from_lit_res_test() {
+        let ltrue = LitRes::True;
+        let lfalse = LitRes::False;
+        let l1 = Lit(1);
+        let l2 = Lit(2);
+        let lr1 = LitRes::Lit(l1);
+        let lr2 = LitRes::Lit(l2);
+
+        assert!(Clause::from_lit_res(vec![lfalse, lfalse]).is_none());
+        assert!(Clause::from_lit_res(vec![lfalse, ltrue, lr1]).is_none());
+        assert_eq!(
+            Clause::from_lit_res(vec![lr1, lfalse, lr2]).unwrap(),
+            Clause(vec![l1, l2])
+        );
+    }
+
+    #[test]
+    fn add_clause_test() {
+        let l1 = Lit(1);
+        let l2 = Lit(2);
+        let c = Clause::from(vec![l1, l2]);
+
+        let mut cnf = Cnf::new();
+
+        cnf.add_clause(c.clone());
+        assert_eq!(cnf.0, vec![c.clone()]);
+
+        cnf.add_clause_if(Some(c.clone()));
+        assert_eq!(cnf.0, vec![c.clone(), c.clone()]);
+
+        cnf.add_clause_if(None);
+        assert_eq!(cnf.0, vec![c.clone(), c.clone()]);
     }
 }
