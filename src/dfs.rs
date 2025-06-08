@@ -1,32 +1,31 @@
-//! A simple DFS visitor.
-//!
-//! Start a DFS from a node using [`from_node`], or visit all the AIG by starting from the outputs
-//! using [`from_outputs`]. In the latter case, it will start by the fanin of the first output,
-//! then explore all non-previously-explored nodes from the fanin of the second output,
-//! and so on until all the outputs have been processed.
-//!
-//! [`from_node`]: Dfs::from_node
-//! [`from_outputs`]: Dfs::from_outputs
-//!
-//! Example:
-//!
-//! ```rust
-//! use mutaig::{Aig, dfs::Dfs};
-//! let mut aig = Aig::new();
-//! // You can modify the aig here
-//! let mut dfs = Dfs::from_outputs(&aig);
-//! while let Some(noderef) = dfs.next(&aig) {
-//!     // You can still borrow mut aig here!
-//!     // ...
-//! }
-//! ```
-//!
-//! Inspired by [petgraph DFS](https://docs.rs/petgraph/latest/petgraph/visit/struct.Dfs.html).
-
 use std::collections::HashSet;
 
 use crate::{Aig, AigNode, AigNodeRef, NodeId};
 
+/// A simple DFS visitor.
+///
+/// Start a DFS from a node using [`from_node`], or visit all the AIG by starting from the outputs
+/// using [`from_outputs`]. In the latter case, it will start by the fanin of the first output,
+/// then explore all non-previously-explored nodes from the fanin of the second output,
+/// and so on until all the outputs have been processed.
+///
+/// [`from_node`]: Dfs::from_node
+/// [`from_outputs`]: Dfs::from_outputs
+///
+/// Example:
+///
+/// ```rust
+/// use mutaig::{Aig, dfs::Dfs};
+/// let mut aig = Aig::new();
+/// // You can modify the aig here
+/// let mut dfs = Dfs::from_outputs(&aig);
+/// while let Some(noderef) = dfs.next(&aig) {
+///     // You can still borrow mut aig here/
+///     // ...
+/// }
+/// ```
+///
+/// Inspired by [petgraph DFS](https://docs.rs/petgraph/latest/petgraph/visit/struct.Dfs.html).
 pub struct Dfs {
     /// Must maintain the following invariant:
     /// - all nodes on the stack have not been visited yet
