@@ -43,6 +43,20 @@ pub enum AigError {
     /// node `nodes[id]` should have id `id`. If this error is raised, my code is garbage.
     #[error("the AIG has reached an invalid state - this should not happen")]
     InvalidState,
+
+    /// Creation of a miter failed because the two AIGs have different inputs.
+    /// We are just checking for the inputs id, they should correspond.
+    #[error("trying to construct a miter between two AIGs with different inputs")]
+    MiterDifferentInputs,
+
+    /// Creation of a miter failed because the two AIGs have different outputs.
+    /// We cannot compare the id of each output because they might change,
+    /// so we are just checking that all outputs are mapped between the two AIGs.
+    #[error("trying to construct a miter between two AIGs with different outputs")]
+    MiterDifferentOutputs,
+
+    #[error("node id {0} is not mapped to any literal")]
+    UnmappedNodeToLit(NodeId),
 }
 
 /// Unambiguous fanin selector.
