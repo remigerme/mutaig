@@ -11,6 +11,8 @@ use std::{
 
 use thiserror::Error;
 
+use crate::miter::MiterError;
+
 /// A node id.
 ///
 /// The constant node `False` has id 0 by convention. Also, id must be unique.
@@ -44,19 +46,17 @@ pub enum AigError {
     #[error("the AIG has reached an invalid state - this should not happen")]
     InvalidState,
 
-    /// Creation of a miter failed because the two AIGs have different inputs.
-    /// We are just checking for the inputs id, they should correspond.
-    #[error("trying to construct a miter between two AIGs with different inputs")]
-    MiterDifferentInputs,
+    /// Just forwarding a [`MiterError`].
+    ///
+    /// [`MiterError`]: miter::MiterError
+    #[error("{0}")]
+    MiterError(MiterError),
+}
 
-    /// Creation of a miter failed because the two AIGs have different outputs.
-    /// We cannot compare the id of each output because they might change,
-    /// so we are just checking that all outputs are mapped between the two AIGs.
-    #[error("trying to construct a miter between two AIGs with different outputs")]
-    MiterDifferentOutputs,
-
-    #[error("node id {0} is not mapped to any literal")]
-    UnmappedNodeToLit(NodeId),
+impl From<MiterError> for AigError {
+    fn from(value: MiterError) -> Self {
+        AigError::MiterError(value)
+    }
 }
 
 /// Unambiguous fanin selector.

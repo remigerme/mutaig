@@ -9,7 +9,7 @@
 
 use std::{collections::HashMap, ops::Not};
 
-use crate::{AigEdge, AigError, AigNode, NodeId, Result};
+use crate::{AigEdge, AigNode, NodeId, Result, miter::MiterError};
 
 /// A SAT literal.
 ///
@@ -133,7 +133,7 @@ impl Cnf {
             AigNode::And { id, fanin0, fanin1 } => {
                 let a = fanin0.get_literal_res(litmap)?;
                 let b = fanin1.get_literal_res(litmap)?;
-                let z = LitRes::from(*litmap.get(id).ok_or(AigError::UnmappedNodeToLit(*id))?);
+                let z = LitRes::from(*litmap.get(id).ok_or(MiterError::UnmappedNodeToLit(*id))?);
 
                 self.add_clause_if(Clause::from_lit_res(vec![a, !z]));
                 self.add_clause_if(Clause::from_lit_res(vec![b, !z]));
@@ -146,7 +146,7 @@ impl Cnf {
         Ok(())
     }
 
-    /// Add clauses that encode `z = XOR(a, b)`
+    /// Add clauses that encode `z = XOR(a, b)`.
     ///
     /// - a is the literal associated with the `fanin0`
     /// - b is the literal associated with the `fanin1`
@@ -160,7 +160,17 @@ impl Cnf {
         self.add_clause(Clause::from(vec![!a, !b, !z]));
     }
 
-    /// Add clauses that encode `z = OR(inputs)` while assuming z is true.
+    /// Add clauses that encode `XOR(a, b) = true`.
+    ///
+    /// This is the function to use if you want to compare two internal nodes of the miter for AIGs `a` and `b`:
+    /// - a is the literal associated with the node from aig `a`
+    /// - b is the literal associated with the node from aig `b`
+    pub fn add_xor_whose_output_is_true(&mut self, a: Lit, b: Lit) {
+        self.add_clause(Clause::from(vec![a, b]));
+        self.add_clause(Clause::from(vec![!a, !b]));
+    }
+
+    /// Add clauses that encode `OR(inputs) = true`.
     ///
     /// This is the last node of the miter to compare two circuits.
     /// We assume that the output is true, which means there are at least a pair of outputs
@@ -178,7 +188,7 @@ impl AigEdge {
             LitRes::False
         } else {
             let id = self.node.borrow().get_id();
-            LitRes::from(*litmap.get(&id).ok_or(AigError::UnmappedNodeToLit(id))?)
+            LitRes::from(*litmap.get(&id).ok_or(MiterError::UnmappedNodeToLit(id))?)
         };
         Ok(if self.complement { !lit } else { lit })
     }
