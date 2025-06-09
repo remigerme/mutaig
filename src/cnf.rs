@@ -124,7 +124,11 @@ impl Cnf {
     }
 
     /// Add clauses induced by the node.
-    fn add_clauses(&mut self, node: &AigNode, litmap: &HashMap<NodeId, Lit>) -> Result<()> {
+    pub fn add_clauses_node(
+        &mut self,
+        node: &AigNode,
+        litmap: &HashMap<NodeId, Lit>,
+    ) -> Result<()> {
         match node {
             AigNode::And { id, fanin0, fanin1 } => {
                 let a = fanin0.get_literal_res(litmap)?;

@@ -164,6 +164,7 @@ impl AigNode {
 ///
 /// The use of `Rc` allows us not to worry about having to drop manually nodes that are no longer used, eg.
 /// nodes that were used before by node `A` as their `fanin0`, but `A` is rewritten to use another `fanin0`.
+#[derive(Debug, Clone)]
 pub struct Aig {
     nodes: HashMap<NodeId, AigNodeWeak>,
     inputs: HashSet<AigNodeWeak>,

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{Aig, AigNode, AigNodeRef, NodeId};
+use crate::{Aig, AigNodeRef, NodeId};
 
 /// A simple DFS visitor.
 ///
@@ -41,8 +41,8 @@ pub struct Dfs {
 impl Dfs {
     /// Create a DFS from the initial start node.
     /// You will only browse the fanin of this node.
-    pub fn from_node(start: &AigNode) -> Self {
-        let start_id = start.get_id();
+    pub fn from_node(start: AigNodeRef) -> Self {
+        let start_id = start.borrow().get_id();
         Dfs {
             stack: vec![start_id],
             seen: HashSet::from([start_id]),
@@ -136,7 +136,7 @@ mod test {
             .unwrap();
 
         // Now using the DFS
-        let mut dfs = Dfs::from_node(&*n2.borrow());
+        let mut dfs = Dfs::from_node(n2.clone());
         assert_eq!(dfs.next(&aig).unwrap(), n2.clone()); // first node is known
         let n = dfs.next(&aig).unwrap(); // second node could be either one of its child
         if n == n0.clone() {
@@ -250,7 +250,7 @@ mod test {
                 fanin1: AigEdge::new(n1.clone(), true),
             })
             .unwrap();
-        let mut dfs = Dfs::from_node(&*n2.borrow());
+        let mut dfs = Dfs::from_node(n2.clone());
         assert_eq!(dfs.next(&aig).unwrap(), n2.clone());
         assert_eq!(dfs.next(&aig).unwrap(), n1.clone());
         assert!(dfs.next(&aig).is_none());
