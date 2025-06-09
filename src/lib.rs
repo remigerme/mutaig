@@ -4,7 +4,7 @@ pub mod miter;
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ops::Not,
     rc::{Rc, Weak},
 };
@@ -152,6 +152,7 @@ impl AigNode {
 /// nodes that were used before by node `A` as their `fanin0`, but `A` is rewritten to use another `fanin0`.
 pub struct Aig {
     nodes: HashMap<NodeId, AigNodeWeak>,
+    inputs: HashSet<AigNodeWeak>,
     outputs: HashMap<NodeId, AigNodeRef>,
     keep_nodes_alive: Vec<AigNodeRef>,
 }
@@ -161,6 +162,7 @@ impl Aig {
     pub fn new() -> Self {
         Aig {
             nodes: HashMap::new(),
+            inputs: HashSet::new(),
             outputs: HashMap::new(),
             keep_nodes_alive: Vec::new(),
         }
@@ -180,6 +182,50 @@ impl Aig {
         // Removing no longer valid entries from the nodes
         self.nodes
             .retain(|_, weak_node| weak_node.upgrade().is_some());
+
+        // Same for the inputs
+        self.inputs
+            .retain(|weak_node| weak_node.upgrade().is_some());
+    }
+
+    /// Retrieves valid inputs reference.
+    pub fn get_inputs(&self) -> Vec<AigNodeRef> {
+        self.inputs
+            .iter()
+            .filter_map(|weak_node| {
+                weak_node
+                    .upgrade()
+                    .and_then(|noderef| Some(noderef.clone()))
+            })
+            .collect()
+    }
+
+    /// Retrieves inputs id.
+    pub fn get_inputs_id(&self) -> HashSet<NodeId> {
+        self.inputs
+            .iter()
+            .filter_map(|weak_node| {
+                weak_node
+                    .upgrade()
+                    .and_then(|noderef| Some(noderef.borrow().get_id()))
+            })
+            .collect()
+    }
+
+    /// Retrieves outputs reference.
+    pub fn get_outputs(&self) -> Vec<AigNodeRef> {
+        self.outputs
+            .iter()
+            .map(|(_, noderef)| noderef.clone())
+            .collect()
+    }
+
+    /// Retrieves outputs id.
+    pub fn get_outputs_id(&self) -> HashSet<NodeId> {
+        self.outputs
+            .iter()
+            .map(|(_, noderef)| noderef.borrow().get_id())
+            .collect()
     }
 
     /// Create a new (or retrieve existing) node within the AIG.
@@ -436,5 +482,42 @@ mod test {
         assert_eq!(*aig.get_node(0).unwrap().borrow(), AigNode::False);
         assert_eq!(*aig.get_node(1).unwrap().borrow(), AigNode::Input(1));
         assert_eq!(*aig.get_node(2).unwrap().borrow(), a2);
+
+        assert_eq!(*aig.remove_output(2).unwrap().borrow(), a2);
+        drop(a2); // making sure a2 doesn't exist elsewhere
+        aig.update();
+        assert!(aig.get_node(0).is_none());
+        assert!(aig.get_node(1).is_none());
+        assert!(aig.get_node(2).is_none());
+
+        // Now let's create the following AIG
+        //   A1  A2
+        //  / \ / \
+        // I1  I2  I3
+        // If A1 is not an output, then A1 and I1 should be cleared
+        // and if A2 is an output, then A2, I2, I3 will be kept alive
+        let mut aig = Aig::new();
+        aig.add_node(AigNode::Input(1)).unwrap();
+        aig.add_node(AigNode::Input(2)).unwrap();
+        aig.add_node(AigNode::Input(3)).unwrap();
+        aig.add_node(AigNode::And {
+            id: 4,
+            fanin0: AigEdge::new(aig.get_node(1).unwrap(), false),
+            fanin1: AigEdge::new(aig.get_node(2).unwrap(), false),
+        })
+        .unwrap();
+        aig.add_node(AigNode::And {
+            id: 5,
+            fanin0: AigEdge::new(aig.get_node(2).unwrap(), false),
+            fanin1: AigEdge::new(aig.get_node(3).unwrap(), false),
+        })
+        .unwrap();
+        aig.add_output(5).unwrap();
+        aig.update();
+        assert!(aig.get_node(1).is_none());
+        assert!(aig.get_node(4).is_none());
+        assert!(aig.get_node(2).is_some());
+        assert!(aig.get_node(3).is_some());
+        assert!(aig.get_node(5).is_some());
     }
 }
