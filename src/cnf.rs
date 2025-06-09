@@ -7,9 +7,9 @@
 //!
 //! If the resulting CNF is SAT, it means that the two circuits are **not equivalent**.
 
-use std::{num::TryFromIntError, ops::Not};
+use std::{collections::HashMap, ops::Not};
 
-use crate::{AigEdge, AigNode, NodeId};
+use crate::{AigEdge, AigError, AigNode, NodeId, Result};
 
 /// A SAT literal.
 ///
@@ -28,14 +28,6 @@ impl Not for Lit {
 
     fn not(self) -> Self::Output {
         Lit(-self.0)
-    }
-}
-
-impl TryFrom<NodeId> for Lit {
-    type Error = TryFromIntError;
-
-    fn try_from(value: NodeId) -> Result<Self, Self::Error> {
-        Ok(Lit(i64::try_from(value)?))
     }
 }
 
@@ -61,17 +53,6 @@ impl Not for LitRes {
 impl From<Lit> for LitRes {
     fn from(value: Lit) -> Self {
         LitRes::Lit(value)
-    }
-}
-
-impl TryFrom<&AigNode> for LitRes {
-    type Error = TryFromIntError;
-
-    fn try_from(value: &AigNode) -> Result<Self, Self::Error> {
-        match value {
-            AigNode::False => Ok(LitRes::False),
-            node => Ok(LitRes::Lit(Lit::try_from(node.get_id())?)),
-        }
     }
 }
 
@@ -143,12 +124,12 @@ impl Cnf {
     }
 
     /// Add clauses induced by the node.
-    fn add_clauses(&mut self, node: &AigNode) {
+    fn add_clauses(&mut self, node: &AigNode, litmap: &HashMap<NodeId, Lit>) -> Result<()> {
         match node {
             AigNode::And { id, fanin0, fanin1 } => {
-                let a = fanin0.get_literal_res();
-                let b = fanin1.get_literal_res();
-                let z = LitRes::from(Lit::try_from(*id).unwrap());
+                let a = fanin0.get_literal_res(litmap)?;
+                let b = fanin1.get_literal_res(litmap)?;
+                let z = LitRes::from(*litmap.get(id).ok_or(AigError::UnmappedNodeToLit(*id))?);
 
                 self.add_clause_if(Clause::from_lit_res(vec![a, !z]));
                 self.add_clause_if(Clause::from_lit_res(vec![b, !z]));
@@ -158,6 +139,7 @@ impl Cnf {
             // TODO : what about latches (depending on their initialization status)
             _ => (),
         }
+        Ok(())
     }
 
     /// Add clauses that encode `z = XOR(a, b)`
@@ -187,9 +169,14 @@ impl Cnf {
 }
 
 impl AigEdge {
-    fn get_literal_res(&self) -> LitRes {
-        let lit = LitRes::try_from(&*self.node.borrow()).unwrap();
-        if self.complement { !lit } else { lit }
+    fn get_literal_res(&self, litmap: &HashMap<NodeId, Lit>) -> Result<LitRes> {
+        let lit = if *self.node.borrow() == AigNode::False {
+            LitRes::False
+        } else {
+            let id = self.node.borrow().get_id();
+            LitRes::from(*litmap.get(&id).ok_or(AigError::UnmappedNodeToLit(id))?)
+        };
+        Ok(if self.complement { !lit } else { lit })
     }
 }
 
