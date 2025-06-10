@@ -1,13 +1,18 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    num::TryFromIntError,
+};
 
 use thiserror::Error;
 
 use crate::{
-    Aig, AigError, NodeId, Result,
+    Aig, AigError, AigNode, NodeId, Result,
     cnf::{Cnf, Lit},
     dfs::Dfs,
 };
 
+/// Error returned when an operation related to the miter fails
+/// (creation, combinational equivalence checking, ...).
 #[derive(Debug, Error)]
 pub enum MiterError {
     /// Creation of a miter failed because the two AIGs have different inputs.
@@ -24,11 +29,35 @@ pub enum MiterError {
     /// A node was not mapped to any SAT literal in the miter.
     #[error("node id {0} is not mapped to any literal")]
     UnmappedNodeToLit(NodeId),
+
+    /// Conversion from a NodeId to a SAT literal failed.
+    /// Inputs are assigned their own index as SAT literals.
+    /// However, an input id is represented as a `u64`, and a SAT literal is a `i64`
+    /// so the conversion might fail.
+    #[error("conversion from NodeId to Lit failed because of {0}")]
+    NodeIdToLit(TryFromIntError),
+}
+
+impl From<TryFromIntError> for MiterError {
+    fn from(value: TryFromIntError) -> Self {
+        MiterError::NodeIdToLit(value)
+    }
 }
 
 /// The struct used to perform combinational equivalence checking between two AIGs.
 ///
-/// TODO DOC ON MITER
+/// For background on what is a miter, please check
+/// [Verification of large synthesized designs](https://doi.org/10.1109/ICCAD.1993.580110) by D. Brand.
+///
+/// To use this struct:
+/// - create a new miter with [`new`]
+/// - (optional) merge internal nodes that you know are equivalent using [`try_prove_eq_node`]
+///   (it will incrementally simplify the search space of the generated SAT queries)
+/// - then prove the two original AIGs are equivalent using [`try_prove_eq`].
+///
+/// [`new`]: Miter::new
+/// [`try_prove_eq_node`]: Miter::try_prove_eq_node
+/// [`try_prove_eq`]: Miter::try_prove_eq
 pub struct Miter {
     /// The reference miter.
     a: Aig,
@@ -45,6 +74,8 @@ pub struct Miter {
     /// Keeping track of all nodes from `a` which has been merged to a node of `b`,
     /// ie nodes of `a` pointing at the same SAT literal as a node of `b`.
     merged: HashSet<NodeId>,
+    /// The index of the next literal (for internal use only).
+    next_lit: i64,
 }
 
 impl Miter {
@@ -74,19 +105,71 @@ impl Miter {
             return Err(MiterError::MiterDifferentOutputs.into());
         }
 
-        Ok(Miter {
+        // Finding the first usable literal (ie not used by any input)
+        let mut next_lit = 1;
+        while a.get_inputs_id().contains(&(next_lit as u64)) {
+            next_lit += 1;
+        }
+
+        let mut miter = Miter {
             a: a.clone(),
             b: b.clone(),
             outputs_map,
             litmap_a: HashMap::new(),
             litmap_b: HashMap::new(),
             merged: HashSet::new(),
-        })
+            next_lit,
+        };
+        miter.initialize_litmaps()?;
+
+        Ok(miter)
+    }
+
+    fn initialize_litmaps(&mut self) -> Result<()> {
+        // Assigning literals to nodes in a
+        let mut dfs = Dfs::from_outputs(&self.a);
+        while let Some(n) = dfs.next(&self.a) {
+            match *n.borrow() {
+                AigNode::Input(id) => self
+                    .litmap_a
+                    .insert(id, Lit::try_from(id).map_err(MiterError::from)?),
+                AigNode::And { id, .. } => {
+                    let lit = self.fresh_lit();
+                    self.litmap_a.insert(id, lit)
+                }
+                _ => None,
+                // TODO SUPPORT LATCHES
+            };
+        }
+
+        // Same for b
+        let mut dfs = Dfs::from_outputs(&self.b);
+        while let Some(n) = dfs.next(&self.b) {
+            match *n.borrow() {
+                AigNode::Input(id) => self
+                    .litmap_b
+                    .insert(id, Lit::try_from(id).map_err(MiterError::from)?),
+                AigNode::And { id, .. } => {
+                    let lit = self.fresh_lit();
+                    self.litmap_b.insert(id, lit)
+                }
+                _ => None,
+                // TODO SUPPORT LATCHES
+            };
+        }
+
+        Ok(())
     }
 
     /// Returns a yet unused SAT literal.
     pub fn fresh_lit(&mut self) -> Lit {
-        todo!()
+        let lit = self.next_lit.into();
+        self.next_lit += 1;
+        // Making sure we're not using a SAT literal used by any input
+        while self.a.get_inputs_id().contains(&(self.next_lit as u64)) {
+            self.next_lit += 1;
+        }
+        lit
     }
 
     /// Tries to prove that `node_a` and `node_b` (resp. from `a` and `b`) are equivalent.

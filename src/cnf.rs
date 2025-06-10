@@ -7,7 +7,7 @@
 //!
 //! If the resulting CNF is SAT, it means that the two circuits are **not equivalent**.
 
-use std::{collections::HashMap, ops::Not};
+use std::{collections::HashMap, num::TryFromIntError, ops::Not};
 
 use crate::{AigEdge, AigNode, NodeId, Result, miter::MiterError};
 
@@ -28,6 +28,20 @@ impl Not for Lit {
 
     fn not(self) -> Self::Output {
         Lit(-self.0)
+    }
+}
+
+impl From<i64> for Lit {
+    fn from(value: i64) -> Self {
+        Lit(value)
+    }
+}
+
+impl TryFrom<NodeId> for Lit {
+    type Error = TryFromIntError;
+
+    fn try_from(value: NodeId) -> std::result::Result<Self, Self::Error> {
+        Ok(Lit(i64::try_from(value)?))
     }
 }
 
