@@ -1,11 +1,20 @@
+//! Provides a DFS visitor to allow simple AIG traversal.
+//!
+//! See [`Dfs`] for details.
+//!
+//! [`Dfs`]: Dfs
+
 use std::collections::HashSet;
 
 use crate::{Aig, AigNodeRef, NodeId};
 
 /// A simple DFS visitor.
 ///
-/// Start a DFS from a node using [`from_node`], or visit all the AIG by starting from the outputs
-/// using [`from_outputs`]. In the latter case, it will start by the fanin of the first output,
+/// Nodes are yielded in preorder. You can:
+/// - start a DFS from a node using [`from_node`]
+/// - or visit all the AIG by starting from the outputs using [`from_outputs`].
+///
+/// In the latter case, it will start by the fanin of the first output,
 /// then explore all non-previously-explored nodes from the fanin of the second output,
 /// and so on until all the outputs have been processed.
 ///
@@ -20,7 +29,7 @@ use crate::{Aig, AigNodeRef, NodeId};
 /// // You can modify the aig here
 /// let mut dfs = Dfs::from_outputs(&aig);
 /// while let Some(noderef) = dfs.next(&aig) {
-///     // You can still borrow mut aig here/
+///     // You can still borrow mut aig here
 ///     // ...
 /// }
 /// ```

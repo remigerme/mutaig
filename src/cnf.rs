@@ -1,11 +1,18 @@
 //! Generate miters between two circuits and the resulting SAT formula as a CNF.
 //!
 //! To prove combinational equivalence checking (CEC) between two circuits `a` and `b`:
-//! - generate miter from `a` and `b` with TODO
-//! - extract CNF from the miter with TODO
+//! - generate miter from `a` and `b` with [`Miter::new`]
+//! - extract CNF from the miter with methods of [`Cnf`]
 //! - check that the CNF is **UNSAT** with a SAT solver.
 //!
 //! If the resulting CNF is SAT, it means that the two circuits are **not equivalent**.
+//!
+//! This is already implemented in [`Miter::try_prove_eq_node`] and [`Miter::try_prove_eq`].
+//!
+//! [`Miter::new`]: crate::miter::Miter::new
+//! [`Cnf`]: Cnf
+//! [`Miter::try_prove_eq_node`]: crate::miter::Miter::try_prove_eq_node
+//! [`Miter::try_prove_eq`]: crate::miter::Miter::try_prove_eq
 
 use std::{collections::HashMap, num::TryFromIntError, ops::Not};
 
@@ -14,9 +21,9 @@ use crate::{AigEdge, AigNode, NodeId, Result, miter::MiterError};
 /// A SAT literal.
 ///
 /// Note that all AIG nodes do not correspond to a SAT literal.
-/// For example, `False` node do not map to any literal, but rather is omitted
+/// For example, [`AigNode::False`] node do not map to any literal, but rather is omitted
 /// as false boolean variables can be removed from a clause without changing the problem.
-/// Clauses that contain a true boolean variable (ie a complemented edge to `False` node)
+/// Clauses that contain a true boolean variable (ie a complemented edge to [`AigNode::False`] node)
 /// are obviously true and don't need to be emitted.
 ///
 /// These cases are handled by the internal `LitRes` data structure.
@@ -33,6 +40,9 @@ impl Not for Lit {
 
 impl From<i64> for Lit {
     fn from(value: i64) -> Self {
+        if value == 0 {
+            panic!("Tried to create a Lit from 0. 0 is not a valid literal in DIMACS format.");
+        }
         Lit(value)
     }
 }
@@ -41,7 +51,7 @@ impl TryFrom<NodeId> for Lit {
     type Error = TryFromIntError;
 
     fn try_from(value: NodeId) -> std::result::Result<Self, Self::Error> {
-        Ok(Lit(i64::try_from(value)?))
+        Ok(Lit::from(i64::try_from(value)?))
     }
 }
 
@@ -111,10 +121,11 @@ impl From<Vec<Lit>> for Clause {
 
 /// A SAT CNF that can be passed to a SAT solver.
 ///
-/// It provides useful methods to create a miter such as [`add_xor`]
+/// It provides useful methods to create a miter such as [`add_xor`], [`add_xor_whose_output_is_true`],
 /// and [`add_or_whose_output_is_true`], which can be used to finish the construction of the miter.
 ///
 /// [`add_xor`]: Cnf::add_xor
+/// [`add_xor_whose_output_is_true`]: Cnf::add_xor_whose_output_is_true
 /// [`add_or_whose_output_is_true`]: Cnf::add_or_whose_output_is_true
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cnf(Vec<Clause>);
@@ -260,5 +271,17 @@ mod test {
 
         cnf.add_clause_if(None);
         assert_eq!(cnf.0, vec![c.clone(), c.clone()]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn invalid_lit_from_test() {
+        _ = Lit::from(0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn invalid_lit_tryfrom_test() {
+        _ = Lit::try_from(0 as NodeId);
     }
 }

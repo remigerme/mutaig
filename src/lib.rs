@@ -15,7 +15,7 @@ use crate::miter::MiterError;
 
 /// A node id.
 ///
-/// The constant node `False` has id 0 by convention. Also, id must be unique.
+/// The constant node [`AigNode::False`] has id 0 by convention. Also, id must be unique.
 pub type NodeId = u64;
 
 /// The result of an AIG operation.
@@ -69,6 +69,17 @@ pub enum FaninId {
 /// A directed edge representing a fanin for AIG nodes.
 ///
 /// The edge can carry an inverter according to the value of `complement`.
+///
+/// For example:
+///
+/// ```rust
+/// use mutaig::{Aig, AigEdge, AigNode};
+/// let mut aig = Aig::new();
+/// let node_false = aig.add_node(AigNode::False).unwrap();
+/// let fanin_false = AigEdge::new(node_false.clone(), false);
+/// let fanin_true = AigEdge::new(node_false.clone(), true);
+/// assert_eq!(fanin_false, !fanin_true);
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AigEdge {
     /// The node the edge is refering to.
@@ -162,7 +173,7 @@ impl AigNode {
 /// [`.update()`]: Aig::update
 /// [`.new_and(id, fanin0, fanin1)`]: Aig::new_and
 ///
-/// The use of `Rc` allows us not to worry about having to drop manually nodes that are no longer used, eg.
+/// The use of [`Rc`] allows us not to worry about having to drop manually nodes that are no longer used, eg.
 /// nodes that were used before by node `A` as their `fanin0`, but `A` is rewritten to use another `fanin0`.
 #[derive(Debug, Clone)]
 pub struct Aig {
@@ -245,8 +256,37 @@ impl Aig {
 
     /// Create a new (or retrieve existing) node within the AIG.
     /// This will fail if a different node with the same id already exists in the AIG,
-    /// or if a node uses id 0 (reserved for constant node `False`).
-    fn add_node(&mut self, node: AigNode) -> Result<AigNodeRef> {
+    /// or if a node uses id 0 (reserved for constant node [`AigNode::False`]).
+    ///
+    /// ```rust
+    /// use mutaig::{Aig, AigEdge, AigNode};
+    /// let mut aig = Aig::new();
+    /// let node_false = aig.add_node(AigNode::False).unwrap();
+    /// let i1 = aig.add_node(AigNode::Input(1)).unwrap();
+    /// let i1_ = aig.add_node(AigNode::Input(1)).unwrap(); // will simply retrieve the existing node
+    /// assert_eq!(i1, i1_);
+    ///
+    /// let and_gate =
+    ///     aig.add_node(AigNode::And {
+    ///         id: 2,
+    ///         fanin0: AigEdge::new(i1.clone(), false),
+    ///         fanin1: AigEdge::new(i1.clone(), true)
+    ///     }).unwrap(); // represent i1 ^ !i1 so will be false all the time (just an example)
+    ///
+    /// // Some stuff we cannot do
+    /// // Node with id 0
+    /// assert!(aig.add_node(AigNode::Input(0)).is_err());
+    /// // Id 1 is already taken by an input
+    /// assert!(
+    ///     aig.add_node(AigNode::And {
+    ///         id: 1,
+    ///         fanin0: AigEdge::new(i1.clone(), false),
+    ///         fanin1: AigEdge::new(i1.clone(), false)
+    ///     })
+    ///     .is_err()
+    /// );
+    /// ```
+    pub fn add_node(&mut self, node: AigNode) -> Result<AigNodeRef> {
         let id = node.get_id();
 
         if id == 0 && !matches!(node, AigNode::False) {
