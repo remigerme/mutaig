@@ -205,6 +205,31 @@ impl Cnf {
     pub fn add_or_whose_output_is_true(&mut self, inputs: Vec<Lit>) {
         self.add_clause(Clause::from(inputs));
     }
+
+    /// Returns a string using DIMACS format to represent CNF.
+    pub fn to_dimacs(&self) -> String {
+        let mut dimacs = Vec::new();
+        let var_max = self
+            .0
+            .iter()
+            .flat_map(|clause| &clause.0)
+            .map(|lit| lit.0.abs())
+            .max()
+            .unwrap_or(0);
+        dimacs.push(format!("p cnf {} {}", var_max, self.0.len()));
+
+        for c in &self.0 {
+            let mut cs = String::new();
+            for Lit(val) in &c.0 {
+                cs.push_str(&format!("{} ", val));
+            }
+
+            cs.push('0');
+            dimacs.push(cs);
+        }
+
+        dimacs.join("\n")
+    }
 }
 
 impl AigEdge {
@@ -283,5 +308,25 @@ mod test {
     #[should_panic]
     fn invalid_lit_tryfrom_test() {
         _ = Lit::try_from(0 as NodeId);
+    }
+
+    #[test]
+    fn empty_to_dimacs_test() {
+        let cnf = Cnf::new();
+        assert_eq!(cnf.to_dimacs(), "p cnf 0 0");
+    }
+
+    #[test]
+    fn to_dimacs_test() {
+        let mut cnf = Cnf::new();
+        cnf.add_clause(Clause::from(vec![Lit(1)]));
+        cnf.add_clause(Clause::from(vec![Lit(-1), Lit(2)]));
+        assert_eq!(cnf.to_dimacs(), "p cnf 2 2\n1 0\n-1 2 0");
+
+        cnf.add_clause(Clause::from(vec![Lit(5), Lit(-4), Lit(2)]));
+        assert_eq!(cnf.to_dimacs(), "p cnf 5 3\n1 0\n-1 2 0\n5 -4 2 0");
+
+        cnf.add_clause(Clause::from(vec![Lit(-6)]));
+        assert_eq!(cnf.to_dimacs(), "p cnf 6 4\n1 0\n-1 2 0\n5 -4 2 0\n-6 0")
     }
 }
