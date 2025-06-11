@@ -43,8 +43,8 @@ pub enum AigError {
     /// The AIG has reached an invalid state. This should never happen.
     /// For example, when tracking the nodes internally with the hashmap nodes,
     /// node `nodes[id]` should have id `id`. If this error is raised, my code is garbage.
-    #[error("the AIG has reached an invalid state - this should not happen")]
-    InvalidState,
+    #[error("the AIG has reached an invalid state - this should not happen - error: {0}")]
+    InvalidState(String),
 
     /// Just forwarding a [`MiterError`].
     ///
@@ -246,6 +246,60 @@ impl Aig {
             .collect()
     }
 
+    fn topological_visit(
+        &self,
+        node: AigNodeRef,
+        sort: &mut Vec<AigNodeRef>,
+        seen: &mut HashSet<NodeId>,
+        done: &mut HashSet<NodeId>,
+    ) -> Result<()> {
+        let mut stack: Vec<(AigNodeRef, bool)> = Vec::new();
+        stack.push((node, false));
+
+        while !stack.is_empty() {
+            let (node, last_time) = stack.pop().unwrap();
+            let id = node.borrow().get_id();
+
+            // Post order check
+            if last_time {
+                done.insert(id);
+                sort.push(node);
+                continue;
+            }
+
+            if done.contains(&id) {
+                return Ok(());
+            } else if seen.contains(&id) {
+                return Err(AigError::InvalidState("found a cycle".to_string()));
+            }
+
+            seen.insert(id);
+            stack.push((node.clone(), true));
+            // Warning: latches TODO
+            for n in &node.borrow().get_fanins() {
+                if !done.contains(&n.borrow().get_id()) {
+                    stack.push((n.clone(), false));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Returns a topological sort of the AIG nodes, will error if a cycle is detected.
+    ///
+    /// TODO LATCHES
+    pub fn get_topological_sort(&self) -> Result<Vec<AigNodeRef>> {
+        let mut sort = Vec::new();
+        let mut seen = HashSet::new();
+        let mut done = HashSet::new();
+        for (_, output) in &self.outputs {
+            self.topological_visit(output.clone(), &mut sort, &mut seen, &mut done)?;
+        }
+        sort.reverse();
+        Ok(sort)
+    }
+
     fn check_valid_node_to_add(&self, node: AigNode) -> Result<()> {
         match node {
             AigNode::False => Ok(()),
@@ -397,7 +451,7 @@ impl Aig {
         for (&id, weak_node) in &self.nodes {
             if let Some(node) = weak_node.upgrade() {
                 if node.borrow().get_id() != id {
-                    return Err(AigError::InvalidState);
+                    return Err(AigError::InvalidState("incoherent node id".to_string()));
                 }
 
                 self.check_node_integrity(node)?;
@@ -407,7 +461,9 @@ impl Aig {
         // Checking that all outputs are registered as nodes
         for (&id, _) in &self.outputs {
             if self.get_node(id).is_none() {
-                return Err(AigError::InvalidState);
+                return Err(AigError::InvalidState(
+                    "output is not a node of the aig".to_string(),
+                ));
             }
         }
 
@@ -424,23 +480,23 @@ impl Aig {
         match &*node.borrow() {
             AigNode::False => {
                 if node.borrow().get_id() != 0 {
-                    return Err(AigError::InvalidState);
+                    return Err(AigError::InvalidState("invalid false node".to_string()));
                 }
             }
             AigNode::Input(id) => {
                 if *id == 0 {
-                    return Err(AigError::InvalidState);
+                    return Err(AigError::IdZeroButNotFalse);
                 }
             }
             AigNode::Latch { id, next, .. } => {
                 if *id == 0 {
-                    return Err(AigError::InvalidState);
+                    return Err(AigError::IdZeroButNotFalse);
                 }
                 self.check_edge_integrity(next)?;
             }
             AigNode::And { id, fanin0, fanin1 } => {
                 if *id == 0 {
-                    return Err(AigError::InvalidState);
+                    return Err(AigError::IdZeroButNotFalse);
                 }
                 self.check_edge_integrity(fanin0)?;
                 self.check_edge_integrity(fanin1)?;
@@ -451,7 +507,9 @@ impl Aig {
 
     fn check_edge_integrity(&self, fanin: &AigEdge) -> Result<()> {
         self.get_node(fanin.node.borrow().get_id())
-            .ok_or(AigError::InvalidState)?;
+            .ok_or(AigError::InvalidState(
+                "edge pointing at a node node in aig".to_string(),
+            ))?;
         Ok(())
     }
 }
