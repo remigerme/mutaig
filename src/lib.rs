@@ -178,7 +178,7 @@ impl AigNode {
 #[derive(Debug, Clone)]
 pub struct Aig {
     nodes: HashMap<NodeId, AigNodeWeak>,
-    inputs: HashSet<AigNodeWeak>,
+    inputs: HashMap<NodeId, AigNodeWeak>,
     outputs: HashMap<NodeId, AigNodeRef>,
     keep_nodes_alive: Vec<AigNodeRef>,
 }
@@ -188,7 +188,7 @@ impl Aig {
     pub fn new() -> Self {
         Aig {
             nodes: HashMap::new(),
-            inputs: HashSet::new(),
+            inputs: HashMap::new(),
             outputs: HashMap::new(),
             keep_nodes_alive: Vec::new(),
         }
@@ -211,18 +211,14 @@ impl Aig {
 
         // Same for the inputs
         self.inputs
-            .retain(|weak_node| weak_node.upgrade().is_some());
+            .retain(|_, weak_node| weak_node.upgrade().is_some());
     }
 
     /// Retrieves valid inputs reference.
     pub fn get_inputs(&self) -> Vec<AigNodeRef> {
         self.inputs
-            .iter()
-            .filter_map(|weak_node| {
-                weak_node
-                    .upgrade()
-                    .and_then(|noderef| Some(noderef.clone()))
-            })
+            .values()
+            .filter_map(|weak_node| weak_node.upgrade())
             .collect()
     }
 
@@ -230,11 +226,7 @@ impl Aig {
     pub fn get_inputs_id(&self) -> HashSet<NodeId> {
         self.inputs
             .iter()
-            .filter_map(|weak_node| {
-                weak_node
-                    .upgrade()
-                    .and_then(|noderef| Some(noderef.borrow().get_id()))
-            })
+            .filter_map(|(&id, weak_node)| weak_node.upgrade().map(|_| id))
             .collect()
     }
 
@@ -252,6 +244,46 @@ impl Aig {
             .iter()
             .map(|(_, noderef)| noderef.borrow().get_id())
             .collect()
+    }
+
+    fn check_valid_node_to_add(&self, node: AigNode) -> Result<()> {
+        match node {
+            AigNode::False => Ok(()),
+            AigNode::Input(id) => {
+                if id == 0 {
+                    Err(AigError::IdZeroButNotFalse)
+                } else {
+                    Ok(())
+                }
+            }
+            AigNode::And { id, fanin0, fanin1 } => {
+                if id == 0 {
+                    Err(AigError::IdZeroButNotFalse)
+                } else {
+                    let fanin0_id = fanin0.node.borrow().get_id();
+                    let fanin1_id = fanin1.node.borrow().get_id();
+                    if !self.nodes.contains_key(&fanin0_id) {
+                        Err(AigError::NodeDoesNotExist(fanin0_id))
+                    } else if !self.nodes.contains_key(&fanin1_id) {
+                        Err(AigError::NodeDoesNotExist(fanin1_id))
+                    } else {
+                        Ok(())
+                    }
+                }
+            }
+            AigNode::Latch { id, next, .. } => {
+                if id == 0 {
+                    Err(AigError::IdZeroButNotFalse)
+                } else {
+                    let next_id = next.node.borrow().get_id();
+                    if !self.nodes.contains_key(&next_id) {
+                        Err(AigError::NodeDoesNotExist(next_id))
+                    } else {
+                        Ok(())
+                    }
+                }
+            }
+        }
     }
 
     /// Create a new (or retrieve existing) node within the AIG.
@@ -287,18 +319,18 @@ impl Aig {
     /// );
     /// ```
     pub fn add_node(&mut self, node: AigNode) -> Result<AigNodeRef> {
+        self.check_valid_node_to_add(node.clone())?;
+
         let id = node.get_id();
-
-        if id == 0 && !matches!(node, AigNode::False) {
-            return Err(AigError::IdZeroButNotFalse);
-        }
-
         match self.get_node(id) {
             // No node with this id, let's create a new one
             None => {
                 let n: Rc<RefCell<AigNode>> = Rc::new(RefCell::new(node));
                 self.nodes.insert(id, Rc::downgrade(&n));
                 self.keep_nodes_alive.push(n.clone());
+                if matches!(*n.borrow(), AigNode::Input(_)) {
+                    self.inputs.insert(id, Rc::downgrade(&n));
+                }
                 Ok(n)
             }
             // A node was found, maybe it is just the one we're trying to create
@@ -432,10 +464,6 @@ mod test {
     fn add_node_test() {
         let mut aig = Aig::new();
 
-        // Id 0 is reserved for node false
-        // Even if aig is empty!
-        assert!(aig.add_node(AigNode::Input(0)).is_err());
-
         // Adding legit nodes
         let nf = AigNode::False;
         let rnf = aig.add_node(nf.clone()).unwrap();
@@ -466,6 +494,54 @@ mod test {
         assert_eq!(*aig.add_node(nf.clone()).unwrap().borrow(), nf);
         assert_eq!(*aig.add_node(i1.clone()).unwrap().borrow(), i1);
         assert_eq!(*aig.add_node(a2.clone()).unwrap().borrow(), a2);
+    }
+
+    #[test]
+    fn add_node_test_invalid_id0() {
+        let mut a = Aig::new();
+        // Even if False node does not exist in the AIG
+        assert!(a.add_node(AigNode::Input(0)).is_err());
+        let i1 = a.add_node(AigNode::Input(1)).unwrap();
+        assert!(
+            a.add_node(AigNode::And {
+                id: 0,
+                fanin0: AigEdge::new(i1.clone(), false),
+                fanin1: AigEdge::new(i1.clone(), false)
+            })
+            .is_err()
+        );
+        assert!(
+            a.add_node(AigNode::Latch {
+                id: 0,
+                next: AigEdge::new(i1.clone(), false),
+                init: None
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn add_node_test_invalid_dependency() {
+        let mut a = Aig::new();
+
+        let fake_false = Rc::new(RefCell::new(AigNode::False));
+        assert!(
+            a.add_node(AigNode::And {
+                id: 1,
+                fanin0: AigEdge::new(fake_false.clone(), false),
+                fanin1: AigEdge::new(fake_false.clone(), false),
+            })
+            .is_err()
+        );
+
+        assert!(
+            a.add_node(AigNode::Latch {
+                id: 1,
+                next: AigEdge::new(fake_false.clone(), false),
+                init: None
+            })
+            .is_err()
+        );
     }
 
     #[test]
