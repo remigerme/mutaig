@@ -64,7 +64,7 @@ pub struct Miter {
     /// The optimized miter.
     b: Aig,
     /// Maps outputs of `a` to outputs of `b`.
-    outputs_map: HashMap<NodeId, NodeId>,
+    outputs_map: HashMap<(NodeId, bool), (NodeId, bool)>,
     /// Associating a SAT literal to each node.
     /// Nodes from `a` might also refer a literal originally associated with a node of `b`.
     litmap_a: HashMap<NodeId, Lit>,
@@ -78,6 +78,34 @@ pub struct Miter {
     next_lit: i64,
 }
 
+fn check_outputs(
+    a: &Aig,
+    b: &Aig,
+    outputs_map: &HashMap<(NodeId, bool), (NodeId, bool)>,
+) -> Result<()> {
+    // Checking outputs of a are registered
+    if a.get_outputs()
+        .iter()
+        .map(|output| (output.get_node().borrow().get_id(), output.get_complement()))
+        .collect::<HashSet<(u64, bool)>>()
+        != outputs_map.keys().copied().collect()
+    {
+        return Err(MiterError::MiterDifferentOutputs.into());
+    }
+
+    // Checking outputs of b are registered
+    if b.get_outputs()
+        .iter()
+        .map(|output| (output.get_node().borrow().get_id(), output.get_complement()))
+        .collect::<HashSet<(u64, bool)>>()
+        != outputs_map.values().copied().collect()
+    {
+        return Err(MiterError::MiterDifferentOutputs.into());
+    }
+
+    Ok(())
+}
+
 impl Miter {
     /// Create miter between two AIGs.
     ///
@@ -87,7 +115,11 @@ impl Miter {
     ///
     /// To check the latter, the `outputs_map` is used:
     /// every output of `a` must be mapped to an output of `b`.
-    pub fn new(a: &Aig, b: &Aig, outputs_map: HashMap<NodeId, NodeId>) -> Result<Self> {
+    pub fn new(
+        a: &Aig,
+        b: &Aig,
+        outputs_map: HashMap<(NodeId, bool), (NodeId, bool)>,
+    ) -> Result<Self> {
         // Checking inputs
         if a.get_inputs_id() != b.get_inputs_id() {
             return Err(
@@ -95,15 +127,8 @@ impl Miter {
             );
         }
 
-        // Checking outputs of a are registered
-        if a.get_outputs_id() != outputs_map.iter().map(|(oa, _)| *oa).collect() {
-            return Err(MiterError::MiterDifferentOutputs.into());
-        }
-
-        // Checking outputs of b are registered
-        if b.get_outputs_id() != outputs_map.iter().map(|(_, ob)| *ob).collect() {
-            return Err(MiterError::MiterDifferentOutputs.into());
-        }
+        // Checking outputs
+        check_outputs(a, b, &outputs_map)?;
 
         // Finding the first usable literal (ie not used by any input)
         let mut next_lit = 1;
@@ -250,17 +275,19 @@ impl Miter {
         // Generating final clauses
         let mut xor_lits = Vec::new();
         let outputs_map = self.outputs_map.clone();
-        for (oa, ob) in outputs_map {
+        for ((id_a, compl_a), (id_b, compl_b)) in outputs_map {
             let z = self.fresh_lit();
+            let a = *self
+                .litmap_a
+                .get(&id_a)
+                .ok_or(MiterError::UnmappedNodeToLit(id_a))?;
+            let b = *self
+                .litmap_b
+                .get(&id_b)
+                .ok_or(MiterError::UnmappedNodeToLit(id_b))?;
             cnf.add_xor(
-                *self
-                    .litmap_a
-                    .get(&oa)
-                    .ok_or(MiterError::UnmappedNodeToLit(oa))?,
-                *self
-                    .litmap_b
-                    .get(&ob)
-                    .ok_or(MiterError::UnmappedNodeToLit(ob))?,
+                if compl_a { !a } else { a },
+                if compl_b { !b } else { b },
                 z,
             );
             xor_lits.push(z);
@@ -326,13 +353,18 @@ mod test {
             fanin1: AigEdge::new(b2.clone(), false),
         })
         .unwrap();
-        a.add_output(3).unwrap();
+        a.add_output(3, true).unwrap();
         let mut outputs = HashMap::new();
-        outputs.insert(3, 0);
+        outputs.insert((3, true), (3, false));
         assert!(Miter::new(&a, &b, outputs.clone()).is_err());
-        outputs.insert(3, 3);
+        outputs.clear();
+
+        b.add_output(3, false).unwrap();
+        outputs.insert((3, true), (3, true));
         assert!(Miter::new(&a, &b, outputs.clone()).is_err());
-        b.add_output(3).unwrap();
+
+        outputs.clear();
+        outputs.insert((3, true), (3, false));
         assert!(Miter::new(&a, &b, outputs.clone()).is_ok());
 
         // b1 is not used, it is deleted when updating

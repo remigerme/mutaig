@@ -1,6 +1,7 @@
 pub mod cnf;
 pub mod dfs;
 pub mod miter;
+mod parser;
 
 use std::{
     cell::RefCell,
@@ -20,6 +21,18 @@ pub type NodeId = u64;
 
 /// The result of an AIG operation.
 pub type Result<T> = std::result::Result<T, AigError>;
+
+/// Error returned when parsing from file failed.
+#[derive(Debug, Error)]
+pub enum ParserError {
+    /// All features are not supported (only the basics in fact).
+    #[error("unsupported feature: {0}")]
+    UnsupportedFeature(String),
+
+    /// Invalid token, something else was expected.
+    #[error("invalid token: {0}")]
+    InvalidToken(String),
+}
 
 /// Error returned when an AIG operation failed.
 #[derive(Debug, Error)]
@@ -50,13 +63,11 @@ pub enum AigError {
     ///
     /// [`MiterError`]: miter::MiterError
     #[error("{0}")]
-    MiterError(MiterError),
-}
+    MiterError(#[from] MiterError),
 
-impl From<MiterError> for AigError {
-    fn from(value: MiterError) -> Self {
-        AigError::MiterError(value)
-    }
+    /// Just forwarding a [`ParserError`].
+    #[error("{0}")]
+    ParserError(#[from] ParserError),
 }
 
 /// Unambiguous fanin selector.
@@ -102,6 +113,14 @@ impl AigEdge {
     pub fn new(node: AigNodeRef, complement: bool) -> Self {
         AigEdge { node, complement }
     }
+
+    pub fn get_node(&self) -> AigNodeRef {
+        self.node.clone()
+    }
+
+    pub fn get_complement(&self) -> bool {
+        self.complement
+    }
 }
 
 /// An AIG node.
@@ -134,7 +153,7 @@ pub type AigNodeRef = Rc<RefCell<AigNode>>;
 type AigNodeWeak = Weak<RefCell<AigNode>>;
 
 impl AigNode {
-    fn get_id(&self) -> NodeId {
+    pub fn get_id(&self) -> NodeId {
         match *self {
             AigNode::False => 0,
             AigNode::Input(id) => id,
@@ -179,7 +198,7 @@ impl AigNode {
 pub struct Aig {
     nodes: HashMap<NodeId, AigNodeWeak>,
     inputs: HashMap<NodeId, AigNodeWeak>,
-    outputs: HashMap<NodeId, AigNodeRef>,
+    outputs: Vec<AigEdge>,
     keep_nodes_alive: Vec<AigNodeRef>,
 }
 
@@ -189,7 +208,7 @@ impl Aig {
         Aig {
             nodes: HashMap::new(),
             inputs: HashMap::new(),
-            outputs: HashMap::new(),
+            outputs: Vec::new(),
             keep_nodes_alive: Vec::new(),
         }
     }
@@ -231,19 +250,8 @@ impl Aig {
     }
 
     /// Retrieves outputs reference.
-    pub fn get_outputs(&self) -> Vec<AigNodeRef> {
-        self.outputs
-            .iter()
-            .map(|(_, noderef)| noderef.clone())
-            .collect()
-    }
-
-    /// Retrieves outputs id.
-    pub fn get_outputs_id(&self) -> HashSet<NodeId> {
-        self.outputs
-            .iter()
-            .map(|(_, noderef)| noderef.borrow().get_id())
-            .collect()
+    pub fn get_outputs(&self) -> Vec<AigEdge> {
+        self.outputs.clone()
     }
 
     fn topological_visit(
@@ -293,8 +301,8 @@ impl Aig {
         let mut sort = Vec::new();
         let mut seen = HashSet::new();
         let mut done = HashSet::new();
-        for (_, output) in &self.outputs {
-            self.topological_visit(output.clone(), &mut sort, &mut seen, &mut done)?;
+        for output in &self.outputs {
+            self.topological_visit(output.node.clone(), &mut sort, &mut seen, &mut done)?;
         }
         sort.reverse();
         Ok(sort)
@@ -405,17 +413,24 @@ impl Aig {
     }
 
     /// Mark an existing node as an output.
-    pub fn add_output(&mut self, id: NodeId) -> Result<()> {
+    pub fn add_output(&mut self, id: NodeId, complement: bool) -> Result<()> {
         let node = self.get_node(id).ok_or(AigError::NodeDoesNotExist(id))?;
-        self.outputs.insert(id, node);
+        self.outputs.push(AigEdge::new(node, complement));
         Ok(())
     }
 
-    /// Remove a node from the outputs. Do not error if node does not exist or was not an output,
-    /// simply returns None instead of the node.
-    pub fn remove_output(&mut self, id: NodeId) -> Option<AigNodeRef> {
+    /// Remove a fanin from the outputs. Do not error if node refered by fanin does not exist
+    /// or if fanin was not an output, simply returns None instead of the node.
+    pub fn remove_output(&mut self, id: NodeId, complement: bool) -> Option<AigNodeRef> {
         let node = self.get_node(id)?;
-        self.outputs.remove(&node.borrow().get_id())
+        let output = AigEdge::new(node.clone(), complement);
+        let len_before = self.outputs.len();
+        self.outputs.retain(|out| *out != output);
+        if self.outputs.len() < len_before {
+            Some(node)
+        } else {
+            None
+        }
     }
 
     /// Replace the given fanin of a node by a new fanin
@@ -459,8 +474,8 @@ impl Aig {
         }
 
         // Checking that all outputs are registered as nodes
-        for (&id, _) in &self.outputs {
-            if self.get_node(id).is_none() {
+        for output in &self.outputs {
+            if self.get_node(output.node.borrow().get_id()).is_none() {
                 return Err(AigError::InvalidState(
                     "output is not a node of the aig".to_string(),
                 ));
@@ -666,13 +681,14 @@ mod test {
         assert_eq!(*aig.get_node(0).unwrap().borrow(), AigNode::False);
         assert_eq!(*aig.get_node(1).unwrap().borrow(), AigNode::Input(1));
         assert_eq!(*aig.get_node(2).unwrap().borrow(), a2);
-        assert!(aig.add_output(2).is_ok());
+        assert!(aig.add_output(2, true).is_ok());
         aig.update();
         assert_eq!(*aig.get_node(0).unwrap().borrow(), AigNode::False);
         assert_eq!(*aig.get_node(1).unwrap().borrow(), AigNode::Input(1));
         assert_eq!(*aig.get_node(2).unwrap().borrow(), a2);
 
-        assert_eq!(*aig.remove_output(2).unwrap().borrow(), a2);
+        assert!(aig.remove_output(2, false).is_none());
+        assert_eq!(*aig.remove_output(2, true).unwrap().borrow(), a2);
         drop(a2); // making sure a2 doesn't exist elsewhere
         aig.update();
         assert!(aig.get_node(0).is_none());
@@ -701,7 +717,7 @@ mod test {
             fanin1: AigEdge::new(aig.get_node(3).unwrap(), false),
         })
         .unwrap();
-        aig.add_output(5).unwrap();
+        aig.add_output(5, false).unwrap();
         aig.update();
         assert!(aig.get_node(1).is_none());
         assert!(aig.get_node(4).is_none());

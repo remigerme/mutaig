@@ -16,7 +16,8 @@ Let's create the following AIG:
 
 ```mermaid
 flowchart TD
-    A((" ")) --- B((" "))
+    O@{shape: text, label: output} --o A((" "))
+    A --- B((" "))
     A --o C((" "))
 
     B --o D((false))
@@ -26,7 +27,7 @@ flowchart TD
     C --- F((i2))
 ```
 
-It represents the boolean function $f(i1, i2) = (\text{true} \land i1) \land \neg(\neg i1 \land i2)$.
+It represents the boolean function $f(i1, i2) = \neg[(\text{true} \land i1) \land \neg(\neg i1 \land i2)]$.
 
 ```rust
 use mutaig::{Aig, AigEdge, AigNode};
@@ -57,7 +58,7 @@ let a5 = aig
     })
     .unwrap();
 
-aig.add_output(5).unwrap();
+aig.add_output(5, true).unwrap();
 aig.update();
 ```
 

@@ -64,7 +64,11 @@ impl Dfs {
     /// It will start by the fanin of the first output, then explore all non-previously-explored nodes
     /// from the fanin of the second output, and so on until all the outputs have been processed.
     pub fn from_outputs(aig: &Aig) -> Self {
-        let mut ids: Vec<NodeId> = aig.outputs.keys().copied().collect();
+        let mut ids: Vec<NodeId> = aig
+            .get_outputs()
+            .iter()
+            .map(|fanin| fanin.node.borrow().get_id())
+            .collect();
         if ids.is_empty() {
             return Dfs {
                 stack: Vec::new(),
@@ -182,8 +186,8 @@ mod test {
                 fanin1: AigEdge::new(n3.clone(), false),
             })
             .unwrap();
-        aig.add_output(2).unwrap();
-        aig.add_output(4).unwrap();
+        aig.add_output(2, false).unwrap();
+        aig.add_output(4, true).unwrap();
 
         // Let's use the AIG - we have so many possible and equally valid DFS :')
         let mut dfs = Dfs::from_outputs(&aig);
