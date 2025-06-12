@@ -218,14 +218,7 @@ impl Miter {
         // prove the CNF is UNSAT using a SAT solver
 
         // Nodes are equivalent, we merge node_a to node_b
-        self.litmap_a.insert(
-            node_a,
-            *self
-                .litmap_b
-                .get(&node_b)
-                .ok_or(MiterError::UnmappedNodeToLit(node_b))?,
-        );
-        self.merged.insert(node_a);
+        self.merge(node_a, node_b)?;
 
         Ok(())
     }
@@ -277,5 +270,74 @@ impl Miter {
         // TODO SAT SOLVER
 
         Ok(())
+    }
+
+    /// **WARNING**
+    ///
+    /// This function is dangerous (and powerful).
+    /// If you have proven ~yourself valuable~ that `node_a` and `node_b` are equivalent,
+    /// then you can simplify the miter by merging `node_a` to `node_b` using this function.
+    ///
+    /// It is public mostly to allow *structural hashing* (also known as *strashing*) external implementations.
+    /// Or other optimizations when trying to prove equivalence between AIGs.
+    ///
+    /// For more information on strashing, check the following paper:
+    /// FRAIGs: A Unifying Representation for Logic Synthesis and Verification
+    /// by Alan Mishchenko, Satrajit Chatterjee, Roland Jiang, Robert Brayton.
+    pub fn merge(&mut self, node_a: NodeId, node_b: NodeId) -> Result<()> {
+        self.litmap_a.insert(
+            node_a,
+            *self
+                .litmap_b
+                .get(&node_b)
+                .ok_or(MiterError::UnmappedNodeToLit(node_b))?,
+        );
+        self.merged.insert(node_a);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::AigEdge;
+
+    use super::*;
+
+    #[test]
+    fn new_miter_test() {
+        let mut a = Aig::new();
+        let a1 = a.add_node(AigNode::Input(1)).unwrap();
+        let mut b = Aig::new();
+        let b2 = b.add_node(AigNode::Input(2)).unwrap();
+        assert!(Miter::new(&a, &b, HashMap::new()).is_err());
+
+        let a2 = a.add_node(AigNode::Input(2)).unwrap();
+        b.add_node(AigNode::Input(1)).unwrap(); // not using b1
+        a.add_node(AigNode::And {
+            id: 3,
+            fanin0: AigEdge::new(a1.clone(), false),
+            fanin1: AigEdge::new(a2.clone(), false),
+        })
+        .unwrap();
+        let b0 = b.add_node(AigNode::False).unwrap();
+        b.add_node(AigNode::And {
+            id: 3,
+            fanin0: AigEdge::new(b0.clone(), false),
+            fanin1: AigEdge::new(b2.clone(), false),
+        })
+        .unwrap();
+        a.add_output(3).unwrap();
+        let mut outputs = HashMap::new();
+        outputs.insert(3, 0);
+        assert!(Miter::new(&a, &b, outputs.clone()).is_err());
+        outputs.insert(3, 3);
+        assert!(Miter::new(&a, &b, outputs.clone()).is_err());
+        b.add_output(3).unwrap();
+        assert!(Miter::new(&a, &b, outputs.clone()).is_ok());
+
+        // b1 is not used, it is deleted when updating
+        // a and b won't have same inputs set
+        b.update();
+        assert!(Miter::new(&a, &b, outputs.clone()).is_err());
     }
 }
