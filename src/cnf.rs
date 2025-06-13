@@ -149,6 +149,8 @@ impl Cnf {
     }
 
     /// Add clauses induced by the node.
+    ///
+    /// Latches outputs are considered as pseudo-inputs, and their inputs as pseudo-outputs.
     pub fn add_clauses_node(
         &mut self,
         node: &AigNode,
@@ -165,7 +167,7 @@ impl Cnf {
                 self.add_clause_if(Clause::from_lit_res(vec![!a, !b, z]));
             }
             // The other nodes do not induce any clause, they only generate literals
-            // TODO : what about latches (depending on their initialization status)
+            // Latches are treated as pseudo-outputs/inputs see in miter.
             _ => (),
         }
         Ok(())
@@ -177,7 +179,9 @@ impl Cnf {
     /// - b is the literal associated with the `fanin1`
     /// - z is the literal of the XOR gate itself
     ///
-    /// If you are creating a miter, you should create z with TODO
+    /// If you are creating a miter, you should create z with the [`fresh_lit()`] method.
+    ///
+    /// [`fresh_lit()`]: crate::miter::Miter::fresh_lit
     pub fn add_xor(&mut self, a: Lit, b: Lit, z: Lit) {
         self.add_clause(Clause::from(vec![a, b, !z]));
         self.add_clause(Clause::from(vec![a, !b, z]));
@@ -195,6 +199,28 @@ impl Cnf {
         self.add_clause(Clause::from(vec![!a, !b]));
     }
 
+    /// Add a xor between the two pseudo outputs a and b.
+    /// They are the fanins of some latches which should be equivalent.
+    pub fn add_xor_pseudo_output(
+        &mut self,
+        a: AigEdge,
+        litmap_a: &HashMap<NodeId, Lit>,
+        b: AigEdge,
+        litmap_b: &HashMap<NodeId, Lit>,
+        z: Lit,
+    ) -> Result<()> {
+        let a = a.get_literal_res(litmap_a)?;
+        let b = b.get_literal_res(litmap_b)?;
+        let z = LitRes::from(z);
+
+        self.add_clause_if(Clause::from_lit_res(vec![a, b, !z]));
+        self.add_clause_if(Clause::from_lit_res(vec![a, !b, z]));
+        self.add_clause_if(Clause::from_lit_res(vec![!a, b, z]));
+        self.add_clause_if(Clause::from_lit_res(vec![!a, !b, !z]));
+
+        Ok(())
+    }
+
     /// Add clauses that encode `OR(inputs) = true`.
     ///
     /// This is the last node of the miter to compare two circuits.
@@ -209,6 +235,7 @@ impl Cnf {
     /// Returns a string using DIMACS format to represent CNF.
     pub fn to_dimacs(&self) -> String {
         let mut dimacs = Vec::new();
+        dimacs.reserve(self.0.len());
         let var_max = self
             .0
             .iter()
@@ -218,14 +245,15 @@ impl Cnf {
             .unwrap_or(0);
         dimacs.push(format!("p cnf {} {}", var_max, self.0.len()));
 
+        let mut cs = String::new();
         for c in &self.0 {
-            let mut cs = String::new();
             for Lit(val) in &c.0 {
                 cs.push_str(&format!("{} ", val));
             }
 
             cs.push('0');
-            dimacs.push(cs);
+            dimacs.push(cs.clone());
+            cs.clear();
         }
 
         dimacs.join("\n")

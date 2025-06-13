@@ -111,7 +111,7 @@ impl Dfs {
         while let Some(id) = self.stack.pop() {
             let node = aig.get_node(id).unwrap();
             for child in node.borrow().get_fanins() {
-                let child_id = child.borrow().get_id();
+                let child_id = child.get_node().borrow().get_id();
                 if !self.seen.contains(&child_id) {
                     self.seen.insert(child_id);
                     self.stack.push(child_id);

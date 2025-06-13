@@ -557,11 +557,11 @@ fn build_aig(
     }
 
     // Adding latches
-    // First step: add and nodes with half dummy edges to node false
-    for &(id, _, next_compl, init) in &latches {
+    // First step: add and nodes with dummy edges to node false
+    for &(id, _, _, init) in &latches {
         aig.add_node(AigNode::Latch {
             id: id,
-            next: AigEdge::new(node_false.clone(), next_compl),
+            next: AigEdge::new(node_false.clone(), false),
             init: init,
         })?;
     }
@@ -579,6 +579,11 @@ fn build_aig(
     for &(id, fanin0_id, fanin0_complement, fanin1_id, fanin1_complement) in &ands {
         aig.replace_fanin(id, crate::FaninId::Fanin0, fanin0_id, fanin0_complement)?;
         aig.replace_fanin(id, crate::FaninId::Fanin1, fanin1_id, fanin1_complement)?;
+    }
+
+    // Edit the fanin of the latches
+    for &(id, next_id, next_compl, _) in &latches {
+        aig.replace_fanin(id, crate::FaninId::Fanin0, next_id, next_compl)?;
     }
 
     // And finally marking outputs

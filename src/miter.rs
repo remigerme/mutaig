@@ -1,4 +1,5 @@
 use std::{
+    cmp::max,
     collections::{HashMap, HashSet},
     num::TryFromIntError,
 };
@@ -17,8 +18,14 @@ use crate::{
 pub enum MiterError {
     /// Creation of a miter failed because the two AIGs have different inputs.
     /// We are just checking for the inputs id, they should correspond.
-    #[error("AIGs have different inputs : {0:?} vs {1:?}")]
+    #[error("AIGs have different inputs: {0:?} vs {1:?}")]
     MiterDifferentInputs(HashSet<NodeId>, HashSet<NodeId>),
+
+    /// Creation of a miter failed because the two AIGs have different latches.
+    /// We are just checking for the latches id, they should correspond.
+    /// We don't care about the potential initialized value of the latch.
+    #[error("AIGs have different latches: {0:?} vs {1:?}")]
+    MiterDifferentLatches(HashSet<NodeId>, HashSet<NodeId>),
 
     /// Creation of a miter failed because the two AIGs have different outputs.
     /// We cannot compare the id of each output because they might change,
@@ -127,14 +134,22 @@ impl Miter {
             );
         }
 
+        // Checking latches
+        if a.get_latches_id() != b.get_latches_id() {
+            return Err(
+                MiterError::MiterDifferentLatches(a.get_latches_id(), b.get_latches_id()).into(),
+            );
+        }
+
         // Checking outputs
         check_outputs(a, b, &outputs_map)?;
 
         // Finding the first usable literal (ie not used by any input)
-        let mut next_lit = 1;
-        while a.get_inputs_id().contains(&(next_lit as u64)) {
-            next_lit += 1;
-        }
+        let max_input_id = i64::try_from(*a.get_inputs_id().iter().max().unwrap_or(&1))
+            .map_err(MiterError::from)?;
+        let max_latch_id = i64::try_from(*a.get_latches_id().iter().max().unwrap_or(&1))
+            .map_err(MiterError::from)?;
+        let next_lit = max(max_input_id, max_latch_id);
 
         let mut miter = Miter {
             a: a.clone(),
@@ -158,12 +173,15 @@ impl Miter {
                 AigNode::Input(id) => self
                     .litmap_a
                     .insert(id, Lit::try_from(id).map_err(MiterError::from)?),
+                // Warning: we don't care wether the latch is initialized or not.
+                AigNode::Latch { id, .. } => self
+                    .litmap_a
+                    .insert(id, Lit::try_from(id).map_err(MiterError::from)?),
                 AigNode::And { id, .. } => {
                     let lit = self.fresh_lit();
                     self.litmap_a.insert(id, lit)
                 }
-                _ => None,
-                // TODO SUPPORT LATCHES
+                AigNode::False => None,
             };
         }
 
@@ -174,12 +192,15 @@ impl Miter {
                 AigNode::Input(id) => self
                     .litmap_b
                     .insert(id, Lit::try_from(id).map_err(MiterError::from)?),
+                // Warning: we don't care wether the latch is initialized or not.
+                AigNode::Latch { id, .. } => self
+                    .litmap_b
+                    .insert(id, Lit::try_from(id).map_err(MiterError::from)?),
                 AigNode::And { id, .. } => {
                     let lit = self.fresh_lit();
                     self.litmap_b.insert(id, lit)
                 }
-                _ => None,
-                // TODO SUPPORT LATCHES
+                AigNode::False => None,
             };
         }
 
@@ -188,12 +209,9 @@ impl Miter {
 
     /// Returns a yet unused SAT literal.
     pub fn fresh_lit(&mut self) -> Lit {
+        // Make sure next_lit is initialized above all inputs/latches id.
         let lit = self.next_lit.into();
         self.next_lit += 1;
-        // Making sure we're not using a SAT literal used by any input
-        while self.a.get_inputs_id().contains(&(self.next_lit as u64)) {
-            self.next_lit += 1;
-        }
         lit
     }
 
@@ -274,6 +292,7 @@ impl Miter {
 
         // Generating final clauses
         let mut xor_lits = Vec::new();
+        // Clauses for real outputs
         let outputs_map = self.outputs_map.clone();
         for ((id_a, compl_a), (id_b, compl_b)) in outputs_map {
             let z = self.fresh_lit();
@@ -292,9 +311,24 @@ impl Miter {
             );
             xor_lits.push(z);
         }
+        // Clauses for pseudo-outputs (ie latches)
+        for id in self.a.get_latches_id() {
+            let latch_a = self.a.get_node(id).ok_or(AigError::NodeDoesNotExist(id))?;
+            let latch_b = self.b.get_node(id).ok_or(AigError::NodeDoesNotExist(id))?;
+
+            let fanin_a = latch_a.borrow().get_fanins()[0].clone();
+            let fanin_b = latch_b.borrow().get_fanins()[0].clone();
+            let z = self.fresh_lit();
+
+            cnf.add_xor_pseudo_output(fanin_a, &self.litmap_a, fanin_b, &self.litmap_b, z)?;
+
+            xor_lits.push(z);
+        }
+
         cnf.add_or_whose_output_is_true(xor_lits);
 
         // TODO SAT SOLVER
+        eprintln!("FORMULA\n\n{}\n\n", cnf.to_dimacs());
 
         Ok(())
     }
@@ -367,9 +401,9 @@ mod test {
         outputs.insert((3, true), (3, false));
         assert!(Miter::new(&a, &b, outputs.clone()).is_ok());
 
-        // b1 is not used, it is deleted when updating
-        // a and b won't have same inputs set
+        // b1 is not used, but inputs are not pruned
+        // a and b still will have same inputs set
         b.update();
-        assert!(Miter::new(&a, &b, outputs.clone()).is_err());
+        assert!(Miter::new(&a, &b, outputs.clone()).is_ok());
     }
 }
