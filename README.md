@@ -12,6 +12,8 @@ cargo add mutaig
 
 ## Getting started
 
+### Creating your first AIG
+
 Let's create the following AIG:
 
 ```mermaid
@@ -62,6 +64,112 @@ aig.add_output(5, true).unwrap();
 aig.update();
 ```
 
+In practice, you will probably never have to build an AIG by hand. Instead, you can use the `Aig::from_file` function:
+
+```rust
+use std::path::Path;
+use mutaig::Aig;
+
+let mut aig = Aig::from_file(Path::new("myfile.aag")).unwrap();
+```
+
+with `myfile.aag` in the AIGER format (here ASCII) corresponding to the AIG above:
+
+```
+aag 5 2 0 1 2
+2
+4
+7
+6 8 11
+8 1 2
+10 3 4
+```
+
+Note that the `Aig::from_file` function also supports `.aig` files, which is the binary [AIGER](https://fmv.jku.at/aiger/) format.
+
+### Proving your first functional equivalence
+
+Let's consider the boolean function above once again, and let's simplify it by applying De Morgan's law:
+
+$$
+\begin{align*}
+f(i1, i2) &= \neg[(\text{true} \land i1) \land \neg(\neg i1 \land i2)] \\
+&= \neg [i1 \land (i1 \lor \neg i2)] \\
+&= \neg i1 \lor \neg (i1 \lor \neg i2) \\
+&= \neg i1 \lor (\neg i1 \land i2) \\
+&= \neg i1
+\end{align*}
+$$
+
+It can be represented by the simpler AIG:
+
+```mermaid
+flowchart TD
+    O@{shape: text, label: output} --o A((" "))
+    A((i1))
+    B((i2))
+    C((false))
+```
+
+This will encoded as follows in `optimized.aag`:
+
+```
+aag 1 1 0 1 0
+2
+3
+```
+
+To prove the two AIGs are indeed equivalent, let's create the following miter (reference is using straight lines, optimized uses dotted lines):
+
+```mermaid
+flowchart TD
+    ONE@{shape: text, label: output} --- O
+    O((XOR)) --o|output 1| A((" "))
+    A --- B((" "))
+    A --o C((" "))
+
+    B --o D((false))
+    B --- E((i1))
+
+    C --o E
+    C --- F((i2))
+
+    O -..-o|output 2| E
+```
+
+If the output of the miter is one, the AIGs are different (their outputs differ for the same set of inputs). To prove they are equivalent, let's prove the output of the miter can never be true.
+
+To do that, let's assume it is true. Then generate some SAT clauses using [Tseytin transformation](https://en.wikipedia.org/wiki/Tseytin_transformation), and give the obtained CNF to a SAT solver:
+
+- if the CNF is UNSAT, then AIGs are proven equivalent
+- else if the CNF is SAT, the AIGs are functionally differ (there exists a set of inputs such that the two AIGs return two different results).
+
+In terms of Rust code:
+
+```rust
+use std::path::Path;
+use std::collections::HashMap;
+use mutaig::{Aig, miter::Miter};
+
+let reference = Aig::from_file(Path::new("myfile.aag")).unwrap();
+let optimized = Aig::from_file(Path::new("optimized.aag")).unwrap();
+
+// In general, an AIG might have multiple outputs.
+// So we need to tell the miter which outputs of the reference
+// correspond to which outputs of the optimized version.
+let output_a = reference.get_outputs()[0];
+let id_a = output_a.get_node().borrow().get_id();
+let output_b = optimized.get_outputs()[0];
+let id_b = output_b.get_node().borrow().get_id();
+let outputs_mapping = HashMap::new();
+outputs_mapping.insert((id_a, output_a.get_complement()), (id_b, output_b.get_complement()));
+
+let mut miter = Miter::new(&reference, &optimized, outputs_mapping).unwrap();
+miter.try_prove_eq().unwrap();
+
+// Nodes have been proved equivalent using Tseytin transformation and a SAT solver!
+```
+
 ## Docs
 
 The docs for the latest release of MUTAIG are available on [docs.rs](https://docs.rs/mutaig/latest/mutaig/).
@@ -82,9 +190,9 @@ Inspired by [aig-rs](https://github.com/gipsyh/aig-rs).
 - miter integration with a sat solver
 - integrity checks
 - support latches
-- support creation from a parser/aiger
+- parser bin tests
 - more tests
 - more docs
 - getting started
 
-- add output only with the id? or with the node directly
+- add output only with the id+complement? or with the node+complement directly
