@@ -53,9 +53,10 @@ pub enum AigError {
     #[error("node with id={0} does not exist")]
     NodeDoesNotExist(NodeId),
 
-    /// Invalid operation on a node which should be an AND gate but is not.
-    #[error("the node is not an AND gate")]
-    NotAndGate,
+    /// Invalid operation on a node which does not have such specified fanin.
+    /// Latches only have [`FaninId::Fanin0`].
+    #[error("the node has no such fanin")]
+    NoFanin,
 
     /// The AIG has reached an invalid state. This should never happen.
     /// For example, when tracking the nodes internally with the hashmap nodes,
@@ -166,10 +167,10 @@ impl AigNode {
         }
     }
 
-    fn get_fanins(&self) -> Vec<AigNodeRef> {
+    fn get_fanins(&self) -> Vec<AigEdge> {
         match self {
-            AigNode::Latch { next, .. } => vec![next.node.clone()],
-            AigNode::And { fanin0, fanin1, .. } => vec![fanin0.node.clone(), fanin1.node.clone()],
+            AigNode::Latch { next, .. } => vec![next.clone()],
+            AigNode::And { fanin0, fanin1, .. } => vec![fanin0.clone(), fanin1.clone()],
             _ => vec![],
         }
     }
@@ -178,7 +179,8 @@ impl AigNode {
         match (self, fanin_id) {
             (AigNode::And { fanin0, .. }, FaninId::Fanin0) => Ok(*fanin0 = fanin.clone()),
             (AigNode::And { fanin1, .. }, FaninId::Fanin1) => Ok(*fanin1 = fanin.clone()),
-            _ => Err(AigError::NotAndGate),
+            (AigNode::Latch { next, .. }, FaninId::Fanin0) => Ok(*next = fanin.clone()),
+            _ => Err(AigError::NoFanin),
         }
     }
 }
@@ -201,19 +203,30 @@ impl AigNode {
 #[derive(Debug, Clone)]
 pub struct Aig {
     nodes: HashMap<NodeId, AigNodeWeak>,
-    inputs: HashMap<NodeId, AigNodeWeak>,
+    /// Inputs must be kept artificially alive as
+    /// we don't want to remove them even if the outputs do not depend on them.
+    inputs: HashMap<NodeId, AigNodeRef>,
+    /// Latches must be kept artificially alive as
+    /// we don't want to remove them even if the outputs do not depend on them.
+    latches: HashMap<NodeId, AigNodeRef>,
     outputs: Vec<AigEdge>,
     keep_nodes_alive: Vec<AigNodeRef>,
+    // Keep alive node false.
+    _node_false: AigNodeRef,
 }
 
 impl Aig {
-    /// Create a brand new (and empty) AIG.
+    /// Create a brand new AIG (constant node [`AigNode::False`] included).
     pub fn new() -> Self {
+        let node_false = Rc::new(RefCell::new(AigNode::False));
+        let nodes = HashMap::from([(0, Rc::downgrade(&node_false))]);
         Aig {
-            nodes: HashMap::new(),
+            nodes,
             inputs: HashMap::new(),
+            latches: HashMap::new(),
             outputs: Vec::new(),
             keep_nodes_alive: Vec::new(),
+            _node_false: node_false,
         }
     }
 
@@ -231,26 +244,26 @@ impl Aig {
         // Removing no longer valid entries from the nodes
         self.nodes
             .retain(|_, weak_node| weak_node.upgrade().is_some());
-
-        // Same for the inputs
-        self.inputs
-            .retain(|_, weak_node| weak_node.upgrade().is_some());
     }
 
-    /// Retrieves valid inputs reference.
+    /// Retrieves inputs reference.
     pub fn get_inputs(&self) -> Vec<AigNodeRef> {
-        self.inputs
-            .values()
-            .filter_map(|weak_node| weak_node.upgrade())
-            .collect()
+        self.inputs.values().cloned().collect()
     }
 
     /// Retrieves inputs id.
     pub fn get_inputs_id(&self) -> HashSet<NodeId> {
-        self.inputs
-            .iter()
-            .filter_map(|(&id, weak_node)| weak_node.upgrade().map(|_| id))
-            .collect()
+        self.inputs.keys().copied().collect()
+    }
+
+    /// Retrieves latches reference.
+    pub fn get_latches(&self) -> Vec<AigNodeRef> {
+        self.latches.values().cloned().collect()
+    }
+
+    /// Retrieves latches id.
+    pub fn get_latches_id(&self) -> HashSet<NodeId> {
+        self.latches.keys().copied().collect()
     }
 
     /// Retrieves outputs reference.
@@ -289,8 +302,8 @@ impl Aig {
             stack.push((node.clone(), true));
             // Warning: latches TODO
             for n in &node.borrow().get_fanins() {
-                if !done.contains(&n.borrow().get_id()) {
-                    stack.push((n.clone(), false));
+                if !done.contains(&n.get_node().borrow().get_id()) {
+                    stack.push((n.get_node(), false));
                 }
             }
         }
@@ -394,9 +407,12 @@ impl Aig {
                 let n: Rc<RefCell<AigNode>> = Rc::new(RefCell::new(node));
                 self.nodes.insert(id, Rc::downgrade(&n));
                 self.keep_nodes_alive.push(n.clone());
-                if matches!(*n.borrow(), AigNode::Input(_)) {
-                    self.inputs.insert(id, Rc::downgrade(&n));
-                }
+                // If the node is an input or a latch, we must add it to the map
+                match *n.borrow() {
+                    AigNode::Input(_) => self.inputs.insert(id, n.clone()),
+                    AigNode::Latch { .. } => self.latches.insert(id, n.clone()),
+                    _ => None,
+                };
                 Ok(n)
             }
             // A node was found, maybe it is just the one we're trying to create
@@ -535,6 +551,10 @@ impl Aig {
 
 #[cfg(test)]
 mod test {
+    use std::path::Path;
+
+    use crate::miter::Miter;
+
     use super::*;
 
     #[test]
@@ -599,14 +619,15 @@ mod test {
 
     #[test]
     fn add_node_test_invalid_dependency() {
+        // Warning: false is included
         let mut a = Aig::new();
 
-        let fake_false = Rc::new(RefCell::new(AigNode::False));
+        let fake_input = Rc::new(RefCell::new(AigNode::Input(1)));
         assert!(
             a.add_node(AigNode::And {
                 id: 1,
-                fanin0: AigEdge::new(fake_false.clone(), false),
-                fanin1: AigEdge::new(fake_false.clone(), false),
+                fanin0: AigEdge::new(fake_input.clone(), false),
+                fanin1: AigEdge::new(fake_input.clone(), false),
             })
             .is_err()
         );
@@ -614,7 +635,7 @@ mod test {
         assert!(
             a.add_node(AigNode::Latch {
                 id: 1,
-                next: AigEdge::new(fake_false.clone(), false),
+                next: AigEdge::new(fake_input.clone(), false),
                 init: None
             })
             .is_err()
@@ -663,9 +684,15 @@ mod test {
             *aig.add_node(AigNode::False).unwrap().borrow(),
             AigNode::False
         );
+        assert_eq!(
+            *aig.add_node(AigNode::Input(1)).unwrap().borrow(),
+            AigNode::Input(1)
+        );
         assert_eq!(*aig.get_node(0).unwrap().borrow(), AigNode::False);
+        assert_eq!(*aig.get_node(1).unwrap().borrow(), AigNode::Input(1));
         aig.update();
-        assert!(aig.get_node(0).is_none());
+        assert!(aig.get_node(0).is_some()); // false does not get deleted
+        assert!(aig.get_node(1).is_some()); // inputs do not get deleted
 
         // Now let's save the output
         assert_eq!(
@@ -695,15 +722,15 @@ mod test {
         assert_eq!(*aig.remove_output(2, true).unwrap().borrow(), a2);
         drop(a2); // making sure a2 doesn't exist elsewhere
         aig.update();
-        assert!(aig.get_node(0).is_none());
-        assert!(aig.get_node(1).is_none());
+        assert!(aig.get_node(0).is_some()); // false node does not get deleted
+        assert!(aig.get_node(1).is_some()); // inputs do not get deleted
         assert!(aig.get_node(2).is_none());
 
         // Now let's create the following AIG
         //   A1  A2
         //  / \ / \
         // I1  I2  I3
-        // If A1 is not an output, then A1 and I1 should be cleared
+        // If A1 is not an output, then A1 should be cleared (but I1 is kept alive)
         // and if A2 is an output, then A2, I2, I3 will be kept alive
         let mut aig = Aig::new();
         aig.add_node(AigNode::Input(1)).unwrap();
@@ -723,10 +750,29 @@ mod test {
         .unwrap();
         aig.add_output(5, false).unwrap();
         aig.update();
-        assert!(aig.get_node(1).is_none());
+        assert!(aig.get_node(1).is_some());
         assert!(aig.get_node(4).is_none());
         assert!(aig.get_node(2).is_some());
         assert!(aig.get_node(3).is_some());
         assert!(aig.get_node(5).is_some());
+    }
+
+    #[test]
+    fn ultimate() {
+        let a = Aig::from_file(Path::new("beemfwt5b1.aig")).unwrap();
+        let b = Aig::from_file(Path::new("giga_optimized.aig")).unwrap();
+        let outputs = a
+            .get_outputs()
+            .iter()
+            .map(|fanin| {
+                (
+                    (fanin.get_node().borrow().get_id(), fanin.get_complement()),
+                    (fanin.get_node().borrow().get_id(), fanin.get_complement()),
+                )
+            })
+            .collect::<HashMap<(NodeId, bool), (NodeId, bool)>>();
+
+        let mut miter = Miter::new(&a, &b, outputs).unwrap();
+        miter.try_prove_eq().unwrap();
     }
 }
