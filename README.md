@@ -1,6 +1,6 @@
 # MUTAIG: mutable AIG
 
-A library for manipulating And-Inverter Graphs (AIGs), designed for equivalence checking.
+A library for manipulating And-Inverter Graphs (AIGs), designed for combinational equivalence checking.
 
 ## Installation
 
@@ -14,7 +14,7 @@ cargo add mutaig
 
 ### Creating your first AIG
 
-Let's create the following AIG:
+Let's create the following AIG (nodes are representing `AND` gates, and black dots on the edges are inverters ie `NOT` gates):
 
 ```mermaid
 flowchart TD
@@ -30,6 +30,8 @@ flowchart TD
 ```
 
 It represents the boolean function $f(i1, i2) = \neg[(\text{true} \land i1) \land \neg(\neg i1 \land i2)]$.
+
+It can be created manually as follows:
 
 ```rust
 use mutaig::{Aig, AigEdge, AigNode};
