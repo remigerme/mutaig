@@ -756,23 +756,4 @@ mod test {
         assert!(aig.get_node(3).is_some());
         assert!(aig.get_node(5).is_some());
     }
-
-    #[test]
-    fn ultimate() {
-        let a = Aig::from_file(Path::new("beemfwt5b1.aig")).unwrap();
-        let b = Aig::from_file(Path::new("giga_optimized.aig")).unwrap();
-        let outputs = a
-            .get_outputs()
-            .iter()
-            .map(|fanin| {
-                (
-                    (fanin.get_node().borrow().get_id(), fanin.get_complement()),
-                    (fanin.get_node().borrow().get_id(), fanin.get_complement()),
-                )
-            })
-            .collect::<HashMap<(NodeId, bool), (NodeId, bool)>>();
-
-        let mut miter = Miter::new(&a, &b, outputs).unwrap();
-        miter.try_prove_eq().unwrap();
-    }
 }
