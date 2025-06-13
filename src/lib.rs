@@ -32,6 +32,10 @@ pub enum ParserError {
     /// Invalid token, something else was expected.
     #[error("invalid token: {0}")]
     InvalidToken(String),
+
+    /// An IO error occured (file doesn't exist, or doesn't have the right extension, ...).
+    #[error("io error: {0}")]
+    IoError(String),
 }
 
 /// Error returned when an AIG operation failed.
