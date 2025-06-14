@@ -277,6 +277,7 @@ impl Aig {
         sort: &mut Vec<AigNodeRef>,
         seen: &mut HashSet<NodeId>,
         done: &mut HashSet<NodeId>,
+        outputs_to_visit: &mut Vec<AigNodeRef>,
     ) -> Result<()> {
         let mut stack: Vec<(AigNodeRef, bool)> = Vec::new();
         stack.push((node, false));
@@ -300,11 +301,25 @@ impl Aig {
 
             seen.insert(id);
             stack.push((node.clone(), true));
-            // Warning: latches TODO
-            for n in &node.borrow().get_fanins() {
-                if !done.contains(&n.get_node().borrow().get_id()) {
-                    stack.push((n.get_node(), false));
+
+            // Time to add potential fanins
+            match &*node.borrow() {
+                // For latches, we don't want to detect "cycles" so we add their fanins
+                // to the list of outputs to visit for later.
+                AigNode::Latch { next, .. } => {
+                    if !done.contains(&next.get_node().borrow().get_id()) {
+                        outputs_to_visit.push(next.get_node());
+                    }
                 }
+                // For and gates, we simply keep going on the DFS.
+                AigNode::And { fanin0, fanin1, .. } => {
+                    for fanin in [fanin0, fanin1] {
+                        if !done.contains(&fanin.get_node().borrow().get_id()) {
+                            stack.push((fanin.get_node(), false));
+                        }
+                    }
+                }
+                _ => (),
             }
         }
 
@@ -313,13 +328,20 @@ impl Aig {
 
     /// Returns a topological sort of the AIG nodes, will error if a cycle is detected.
     ///
-    /// TODO LATCHES
+    /// The "topological" sort makes sense only for the purely combinational part of the AIG,
+    /// ie only without latches. Indeed, latches are allowed to create cycles through their next-state fanin.
     pub fn get_topological_sort(&self) -> Result<Vec<AigNodeRef>> {
         let mut sort = Vec::new();
         let mut seen = HashSet::new();
         let mut done = HashSet::new();
-        for output in &self.outputs {
-            self.topological_visit(output.node.clone(), &mut sort, &mut seen, &mut done)?;
+        let mut outputs_to_visit = self
+            .outputs
+            .iter()
+            .map(|output| output.get_node())
+            .collect::<Vec<AigNodeRef>>();
+
+        while let Some(node) = outputs_to_visit.pop() {
+            self.topological_visit(node, &mut sort, &mut seen, &mut done, &mut outputs_to_visit)?;
         }
         sort.reverse();
         Ok(sort)
@@ -551,10 +573,6 @@ impl Aig {
 
 #[cfg(test)]
 mod test {
-    use std::path::Path;
-
-    use crate::miter::Miter;
-
     use super::*;
 
     #[test]

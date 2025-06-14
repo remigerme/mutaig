@@ -1,6 +1,6 @@
 [package]
 name = "mutaig"
-version = "0.1.3"
+version = "0.2.0"
 authors = ["Rémi Germe <remi.germe@gmail.com>"]
 edition = "2024"
 description = "Mutable AIGs designed for equivalence checking."
@@ -8,6 +8,8 @@ documentation = "https://docs.rs/mutaig"
 readme = "README.md"
 repository = "https://github.com/remigerme/mutaig"
 license = "MIT"
+keywords = ["aig", "equivalence-checking"]
+categories = ["data-structures"]
 
 [dependencies]
 thiserror = "2.0.12"
