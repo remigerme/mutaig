@@ -234,8 +234,6 @@ impl Cnf {
 
     /// Returns a string using DIMACS format to represent CNF.
     pub fn to_dimacs(&self) -> String {
-        let mut dimacs = Vec::new();
-        dimacs.reserve(self.0.len());
         let var_max = self
             .0
             .iter()
@@ -243,20 +241,29 @@ impl Cnf {
             .map(|lit| lit.0.abs())
             .max()
             .unwrap_or(0);
-        dimacs.push(format!("p cnf {} {}", var_max, self.0.len()));
 
-        let mut cs = String::new();
-        for c in &self.0 {
-            for Lit(val) in &c.0 {
-                cs.push_str(&format!("{} ", val));
+        // Pre-calculate approximate size to reduce allocations
+        let estimated_size = 30 + self.0.len() * 20; // rough estimate
+        let mut dimacs = String::with_capacity(estimated_size);
+
+        // Add header
+        dimacs.push_str("p cnf ");
+        dimacs.push_str(&var_max.to_string());
+        dimacs.push(' ');
+        dimacs.push_str(&self.0.len().to_string());
+        dimacs.push('\n');
+
+        // Add clauses
+        for clause in &self.0 {
+            for Lit(val) in &clause.0 {
+                dimacs.push_str(&val.to_string());
+                dimacs.push(' ');
             }
-
-            cs.push('0');
-            dimacs.push(cs.clone());
-            cs.clear();
+            dimacs.push('0');
+            dimacs.push('\n');
         }
 
-        dimacs.join("\n")
+        dimacs
     }
 }
 

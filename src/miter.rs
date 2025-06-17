@@ -118,6 +118,7 @@ impl Miter {
     ///
     /// This will fail if:
     /// - the given AIGs have different inputs (ie inputs with different ids)
+    /// - or they have different latches
     /// - or they have different outputs.
     ///
     /// To check the latter, the `outputs_map` is used:
@@ -215,12 +216,12 @@ impl Miter {
         lit
     }
 
-    /// Tries to prove that `node_a` and `node_b` (resp. from `a` and `b`) are equivalent.
-    /// - if it succeeds, nodes are merged internally for future proofs
-    /// - else, an error explaining why the nodes could not be merged is returned.
+    /// Generates one modular SAT query to try to prove two internal nodes of the AIGs are equivalent.
+    /// You can then give the resulting CNF to a SAT solver.
     ///
-    /// TODO : RELY ON A SAT SOLVER
-    pub fn try_prove_eq_node(&mut self, node_a: NodeId, node_b: NodeId) -> Result<()> {
+    /// If the SAT solver returns UNSAT, then nodes are equivalent.
+    /// Don't forget to merge them using [`Miter::merge`].
+    pub fn extract_cnf_node(&mut self, node_a: NodeId, node_b: NodeId) -> Result<Cnf> {
         let mut cnf = Cnf::new();
 
         // Generating clauses from a
@@ -257,23 +258,18 @@ impl Miter {
                 .ok_or(MiterError::UnmappedNodeToLit(node_b))?,
         );
 
-        // TODO
-        // prove the CNF is UNSAT using a SAT solver
-
-        // Nodes are equivalent, we merge node_a to node_b
-        self.merge(node_a, node_b)?;
-
-        Ok(())
+        Ok(cnf)
     }
 
-    /// Tries to prove that the two AIGs are equivalent by generating one monolithic SAT query.
-    /// - if it succeeds, the function simply returns Ok(())
-    /// - else, it fails with an error indicating what went wrong.
+    /// Generates one monolithic SAT query to try to prove the AIGs are equivalent.
+    /// You can then give the resulting CNF to a SAT solver.
+    ///
+    /// If the SAT solver returns UNSAT, then the AIGs are indeed equivalent.
     ///
     /// This is the naive implementation of combinational equivalence checking.
     /// Note that it might also just take too much time on large circuits,
-    /// because the generated SAT query is too large for SAT solvers.
-    pub fn try_prove_eq(&mut self) -> Result<()> {
+    /// because the generated SAT query is way too large for SAT solvers.
+    pub fn extract_cnf(&mut self) -> Result<Cnf> {
         let mut cnf = Cnf::new();
 
         // Generating clauses from a
@@ -327,10 +323,7 @@ impl Miter {
 
         cnf.add_or_whose_output_is_true(xor_lits);
 
-        // TODO SAT SOLVER
-        eprintln!("FORMULA\n\n{}\n\n", cnf.to_dimacs());
-
-        Ok(())
+        Ok(cnf)
     }
 
     /// **WARNING**
