@@ -523,8 +523,9 @@ impl Aig {
             }
         }
 
-        // TODO more sophisticated checks
-        // notably acylicity (warning, latches)
+        // Checks for acyclicity
+        self.get_topological_sort()?;
+
         Ok(())
     }
 

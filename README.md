@@ -72,7 +72,7 @@ In practice, you will probably never have to build an AIG by hand. Instead, you 
 use std::path::Path;
 use mutaig::Aig;
 
-let mut aig = Aig::from_file(Path::new("myfile.aag")).unwrap();
+let mut aig = Aig::from_file("myfile.aag").unwrap();
 ```
 
 with `myfile.aag` in the AIGER format (here ASCII) corresponding to the AIG above:
@@ -149,12 +149,11 @@ To do that, let's assume it is true. Then generate some SAT clauses using [Tseyt
 In terms of Rust code:
 
 ```rust
-use std::path::Path;
 use std::collections::HashMap;
 use mutaig::{Aig, miter::Miter};
 
-let reference = Aig::from_file(Path::new("myfile.aag")).unwrap();
-let optimized = Aig::from_file(Path::new("optimized.aag")).unwrap();
+let reference = Aig::from_file("myfile.aag").unwrap();
+let optimized = Aig::from_file("optimized.aag").unwrap();
 
 // In general, an AIG might have multiple outputs.
 // So we need to tell the miter which outputs of the reference
@@ -167,10 +166,24 @@ let outputs_mapping = HashMap::new();
 outputs_mapping.insert((id_a, output_a.get_complement()), (id_b, output_b.get_complement()));
 
 let mut miter = Miter::new(&reference, &optimized, outputs_mapping).unwrap();
-miter.try_prove_eq().unwrap();
+let cnf = miter.extract_cnf().unwrap();
 
-// Nodes have been proved equivalent using Tseytin transformation and a SAT solver!
+// Here you can give the CNF to any SAT solver
+// You can use the dimacs format:
+let dimacs = cnf.to_dimacs();
+
+// If the CNF is UNSAT, AIGs have been proved equivalent using Tseytin transformation and a SAT solver!
 ```
+
+### Proving functional equivalence of internal nodes
+
+When AIGs are too large, the extracted CNF is too large for SAT solvers. Note that modern SAT solvers are incredibly efficient (for example [kissat](https://github.com/arminbiere/kissat) was able to prove a CNF with 50 million of clauses UNSAT in less than 10s). But still, this doesn't scale for very large circuits.
+
+You should look at three very helpful functions:
+
+- `mergeable`: to check if nodes are obviously functionally equivalent
+- `extract_cnf_node`: to extract a miter+CNF between two internal nodes
+- `merge`: to merge two nodes that you have proven equivalent (using `mergeable` or `extract_cnf_node`)
 
 ## Docs
 
@@ -189,12 +202,6 @@ Inspired by [aig-rs](https://github.com/gipsyh/aig-rs).
 # TODO
 
 - miter tests
-- miter integration with a sat solver
-- integrity checks
-- support latches
 - parser bin tests
 - more tests
 - more docs
-- getting started
-
-- add output only with the id+complement? or with the node+complement directly

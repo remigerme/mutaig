@@ -606,10 +606,10 @@ impl Aig {
     /// Warning, this uses a homemade "parser" which isn't super well tested and
     /// definitely does not support all AIG features (only the bare minimum).
     /// We're not trying to open weird looking AIG files or do any sequential work for now.
-    pub fn from_file(path: &Path) -> Result<Self> {
+    pub fn from_file<P: AsRef<Path>>(path: &P) -> Result<Self> {
         let f = File::open(path).map_err(|z| ParserError::IoError(z.to_string()))?;
         let reader = BufReader::new(f);
-        match path.extension().and_then(|ext| ext.to_str()) {
+        match path.as_ref().extension().and_then(|ext| ext.to_str()) {
             Some("aag") => Aig::from_ascii(reader),
             Some("aig") => Aig::from_bin(reader),
             _ => Err(
