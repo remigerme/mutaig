@@ -7,7 +7,7 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    Aig, AigError, AigNode, NodeId, Result,
+    Aig, AigError, AigNode, AigNodeRef, NodeId, Result,
     cnf::{Cnf, Lit},
     dfs::Dfs,
 };
@@ -216,6 +216,67 @@ impl Miter {
         lit
     }
 
+    /// Internal DFS not investigating children of a merged node.
+    ///
+    fn extract_cnf_from(
+        &self,
+        node: AigNodeRef,
+        cnf: &mut Cnf,
+        done: &mut HashSet<NodeId>,
+        merged: Option<&HashSet<NodeId>>,
+        litmap: &HashMap<u64, Lit>,
+    ) -> Result<()> {
+        // Invariants for the stack, nodes
+        // - are not in done
+        // - are not in merged
+        let mut stack = Vec::new();
+
+        // Making sure invariants are satisfied
+        let id = node.borrow().get_id();
+        if done.contains(&id) {
+            return Ok(());
+        }
+        if let Some(merged_set) = merged {
+            if merged_set.contains(&id) {
+                return Ok(());
+            }
+        }
+        stack.push(node);
+
+        while let Some(node) = stack.pop() {
+            let id = node.borrow().get_id();
+
+            done.insert(id);
+            cnf.add_clauses_node(&*node.borrow(), litmap)?;
+
+            // Time to add potential fanins
+            match &*node.borrow() {
+                // Interested in and gates only
+                AigNode::And { fanin0, fanin1, .. } => {
+                    for fanin in [fanin0, fanin1] {
+                        let fanin_id = fanin.get_node().borrow().get_id();
+                        // Has the node been already handled?
+                        if !done.contains(&fanin_id) {
+                            // Was a merged set provided? Was the node merged before?
+                            if let Some(merged_set) = merged {
+                                if !merged_set.contains(&fanin_id) {
+                                    stack.push(fanin.get_node());
+                                }
+                            } else {
+                                stack.push(fanin.get_node());
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            };
+        }
+
+        Ok(())
+
+        // Adding the
+    }
+
     /// Generates one modular SAT query to try to prove two internal nodes of the AIGs are equivalent.
     /// You can then give the resulting CNF to a SAT solver.
     ///
@@ -225,26 +286,28 @@ impl Miter {
         let mut cnf = Cnf::new();
 
         // Generating clauses from a
-        let mut dfs = Dfs::from_node(
+        let mut done_a = HashSet::new();
+        self.extract_cnf_from(
             self.a
                 .get_node(node_a)
                 .ok_or(AigError::NodeDoesNotExist(node_a))?,
-        );
-        while let Some(n) = dfs.next(&self.a) {
-            if !self.merged.contains(&n.borrow().get_id()) {
-                cnf.add_clauses_node(&*n.borrow(), &self.litmap_a)?;
-            }
-        }
+            &mut cnf,
+            &mut done_a,
+            Some(&self.merged),
+            &self.litmap_a,
+        )?;
 
         // Generating clauses from b
-        let mut dfs = Dfs::from_node(
+        let mut done_b = HashSet::new();
+        self.extract_cnf_from(
             self.b
                 .get_node(node_b)
                 .ok_or(AigError::NodeDoesNotExist(node_b))?,
-        );
-        while let Some(n) = dfs.next(&self.b) {
-            cnf.add_clauses_node(&*n.borrow(), &self.litmap_b)?;
-        }
+            &mut cnf,
+            &mut done_b,
+            None,
+            &self.litmap_b,
+        )?;
 
         // Generating final clauses
         cnf.add_xor_whose_output_is_true(
@@ -273,17 +336,27 @@ impl Miter {
         let mut cnf = Cnf::new();
 
         // Generating clauses from a
-        let mut dfs = Dfs::from_outputs(&self.a);
-        while let Some(n) = dfs.next(&self.a) {
-            if !self.merged.contains(&n.borrow().get_id()) {
-                cnf.add_clauses_node(&*n.borrow(), &self.litmap_a)?;
-            }
+        let mut done_a = HashSet::new();
+        for output in self.a.get_outputs() {
+            self.extract_cnf_from(
+                output.get_node(),
+                &mut cnf,
+                &mut done_a,
+                Some(&self.merged),
+                &self.litmap_a,
+            )?;
         }
 
         // Generating clauses from b
-        let mut dfs = Dfs::from_outputs(&self.b);
-        while let Some(n) = dfs.next(&self.b) {
-            cnf.add_clauses_node(&*n.borrow(), &self.litmap_b)?;
+        let mut done_b = HashSet::new();
+        for output in self.b.get_outputs() {
+            self.extract_cnf_from(
+                output.get_node(),
+                &mut cnf,
+                &mut done_b,
+                None,
+                &self.litmap_b,
+            )?;
         }
 
         // Generating final clauses
