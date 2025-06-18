@@ -343,7 +343,6 @@ impl Aig {
         while let Some(node) = outputs_to_visit.pop() {
             self.topological_visit(node, &mut sort, &mut seen, &mut done, &mut outputs_to_visit)?;
         }
-        sort.reverse();
         Ok(sort)
     }
 
