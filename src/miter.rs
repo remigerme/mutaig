@@ -80,7 +80,10 @@ pub struct Miter {
     litmap_b: HashMap<NodeId, Lit>,
     /// Keeping track of all nodes from `a` which has been merged to a node of `b`,
     /// ie nodes of `a` pointing at the same SAT literal as a node of `b`.
-    merged: HashSet<NodeId>,
+    merged_a: HashSet<NodeId>,
+    /// Keep track of all merged nodes (id_a, id_b, complement).
+    /// Complement indicates wether nodes have equal boolean functions, or complemented ones.
+    merged: HashSet<(NodeId, NodeId, bool)>,
     /// The index of the next literal (for internal use only).
     next_lit: i64,
 }
@@ -159,6 +162,7 @@ impl Miter {
             litmap_a: HashMap::new(),
             litmap_b: HashMap::new(),
             merged: HashSet::new(),
+            merged_a: HashSet::new(),
             next_lit,
         };
         miter.initialize_litmaps()?;
@@ -223,7 +227,7 @@ impl Miter {
         node: AigNodeRef,
         cnf: &mut Cnf,
         done: &mut HashSet<NodeId>,
-        merged: Option<&HashSet<NodeId>>,
+        merged_a: Option<&HashSet<NodeId>>,
         litmap: &HashMap<u64, Lit>,
     ) -> Result<()> {
         // Invariants for the stack, nodes
@@ -236,7 +240,7 @@ impl Miter {
         if done.contains(&id) {
             return Ok(());
         }
-        if let Some(merged_set) = merged {
+        if let Some(merged_set) = merged_a {
             if merged_set.contains(&id) {
                 return Ok(());
             }
@@ -258,7 +262,7 @@ impl Miter {
                         // Has the node been already handled?
                         if !done.contains(&fanin_id) {
                             // Was a merged set provided? Was the node merged before?
-                            if let Some(merged_set) = merged {
+                            if let Some(merged_set) = merged_a {
                                 if !merged_set.contains(&fanin_id) {
                                     stack.push(fanin.get_node());
                                 }
@@ -277,12 +281,20 @@ impl Miter {
         // Adding the
     }
 
-    /// Generates one modular SAT query to try to prove two internal nodes of the AIGs are equivalent.
+    /// Generates one modular SAT query to try to prove two internal signals of the AIGs are equivalent.
+    /// Signals are described by a node id and a complement flag.
+    ///
     /// You can then give the resulting CNF to a SAT solver.
     ///
     /// If the SAT solver returns UNSAT, then nodes are equivalent.
     /// Don't forget to merge them using [`Miter::merge`].
-    pub fn extract_cnf_node(&mut self, node_a: NodeId, node_b: NodeId) -> Result<Cnf> {
+    pub fn extract_cnf_node(
+        &mut self,
+        node_a: NodeId,
+        compl_a: bool,
+        node_b: NodeId,
+        compl_b: bool,
+    ) -> Result<Cnf> {
         let mut cnf = Cnf::new();
 
         // Generating clauses from a
@@ -293,7 +305,7 @@ impl Miter {
                 .ok_or(AigError::NodeDoesNotExist(node_a))?,
             &mut cnf,
             &mut done_a,
-            Some(&self.merged),
+            Some(&self.merged_a),
             &self.litmap_a,
         )?;
 
@@ -310,15 +322,17 @@ impl Miter {
         )?;
 
         // Generating final clauses
+        let lit_a = *self
+            .litmap_a
+            .get(&node_a)
+            .ok_or(MiterError::UnmappedNodeToLit(node_a))?;
+        let lit_b = *self
+            .litmap_b
+            .get(&node_b)
+            .ok_or(MiterError::UnmappedNodeToLit(node_b))?;
         cnf.add_xor_whose_output_is_true(
-            *self
-                .litmap_a
-                .get(&node_a)
-                .ok_or(MiterError::UnmappedNodeToLit(node_a))?,
-            *self
-                .litmap_b
-                .get(&node_b)
-                .ok_or(MiterError::UnmappedNodeToLit(node_b))?,
+            if compl_a { !lit_a } else { lit_a },
+            if compl_b { !lit_b } else { lit_b },
         );
 
         Ok(cnf)
@@ -342,7 +356,7 @@ impl Miter {
                 output.get_node(),
                 &mut cnf,
                 &mut done_a,
-                Some(&self.merged),
+                Some(&self.merged_a),
                 &self.litmap_a,
             )?;
         }
@@ -411,16 +425,92 @@ impl Miter {
     /// For more information on strashing, check the following paper:
     /// FRAIGs: A Unifying Representation for Logic Synthesis and Verification
     /// by Alan Mishchenko, Satrajit Chatterjee, Roland Jiang, Robert Brayton.
-    pub fn merge(&mut self, node_a: NodeId, node_b: NodeId) -> Result<()> {
-        self.litmap_a.insert(
-            node_a,
-            *self
-                .litmap_b
-                .get(&node_b)
-                .ok_or(MiterError::UnmappedNodeToLit(node_b))?,
-        );
-        self.merged.insert(node_a);
+    pub fn merge(&mut self, node_a: NodeId, node_b: NodeId, complement: bool) -> Result<()> {
+        let lit_b = *self
+            .litmap_b
+            .get(&node_b)
+            .ok_or(MiterError::UnmappedNodeToLit(node_b))?;
+        self.litmap_a
+            .insert(node_a, if complement { !lit_b } else { lit_b });
+        self.merged.insert((node_a, node_b, complement));
+        self.merged_a.insert(node_a);
         Ok(())
+    }
+
+    /// Call this function to know wether two nodes can be merged without using a CNF.
+    /// This checks if they indeed have the same logic functions.
+    ///
+    /// Internally, we keep track of all equivalent nodes that have been merged before.
+    ///
+    /// Behavior is as follows:
+    /// - if the two nodes are false, they "can" be merged (but you will get an error
+    ///   if you try to merge them, because they are not mapped to any literal - you should not
+    ///   even try to do this anyway)
+    /// - if the two nodes are the same input, they can be merged
+    /// - if the two nodes are latches with the same id and equivalent next state, they can be merged.
+    ///   Note that we don't care about their init values.
+    /// - if the two nodes are and gates, we check if they have the same output function,
+    ///   regardless of their fanins order for example. We also deal with complemented equivalence.
+    ///   For example, a = b ^ c and a' = c' ^ not(b') are equivalent if b is equivalent to not(b')
+    ///   and c is equivalent to c'.
+    ///
+    /// Unfortunately, it is not possible to check wether two nodes have complemented logic functions
+    /// (the functions are the negation of each other).
+    pub fn mergeable(&self, node_a: NodeId, node_b: NodeId) -> Result<bool> {
+        let na = self
+            .a
+            .get_node(node_a)
+            .ok_or(AigError::NodeDoesNotExist(node_a))?;
+        let nb = self
+            .b
+            .get_node(node_b)
+            .ok_or(AigError::NodeDoesNotExist(node_b))?;
+        match (&*na.borrow(), &*nb.borrow()) {
+            (
+                AigNode::And {
+                    fanin0: fanin0_a,
+                    fanin1: fanin1_a,
+                    ..
+                },
+                AigNode::And {
+                    fanin0: fanin0_b,
+                    fanin1: fanin1_b,
+                    ..
+                },
+            ) => {
+                let id0a = fanin0_a.get_node().borrow().get_id();
+                let c0a = fanin0_a.get_complement();
+                let id1a = fanin1_a.get_node().borrow().get_id();
+                let c1a = fanin1_a.get_complement();
+                let id0b = fanin0_b.get_node().borrow().get_id();
+                let c0b = fanin0_b.get_complement();
+                let id1b = fanin1_b.get_node().borrow().get_id();
+                let c1b = fanin1_b.get_complement();
+
+                // We expect the boolean functions to be the same:
+                // either f0a <=> f0b && f1a <=> f1b
+                // or f0a <=> f1b && f1a <=> f0b
+                Ok((self.merged.contains(&(id0a, id0b, c0a ^ c0b))
+                    && self.merged.contains(&(id1a, id1b, c1a ^ c1b)))
+                    || (self.merged.contains(&(id0a, id1b, c0a ^ c1b))
+                        && self.merged.contains(&(id1a, id0b, c1a ^ c0b))))
+            }
+            // Ignoring init values for latches
+            // Latches must be equal (without complement)
+            (AigNode::Latch { next: next_a, .. }, AigNode::Latch { next: next_b, .. }) => {
+                Ok(node_a == node_b
+                    && self.merged.contains(&(
+                        next_a.get_node().borrow().get_id(),
+                        next_b.get_node().borrow().get_id(),
+                        false,
+                    )))
+            }
+            (AigNode::Input(..), AigNode::Input(..)) => Ok(node_a == node_b),
+            (AigNode::False, AigNode::False) => Ok(true),
+            // Some others merge could be considered, but let's not consider them for now.
+            // Example: constant signal propagation
+            _ => Ok(false),
+        }
     }
 }
 
