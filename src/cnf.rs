@@ -281,6 +281,8 @@ impl AigEdge {
 
 #[cfg(test)]
 mod test {
+    use std::{cell::RefCell, rc::Rc};
+
     use super::*;
 
     #[test]
@@ -363,5 +365,37 @@ mod test {
 
         cnf.add_clause(Clause::from(vec![Lit(-6)]));
         assert_eq!(cnf.to_dimacs(), "p cnf 6 4\n1 0\n-1 2 0\n5 -4 2 0\n-6 0\n")
+    }
+
+    #[test]
+    fn get_literal_res_test() {
+        let nf = Rc::new(RefCell::new(AigNode::False));
+        let mut litmap = HashMap::new();
+        assert_eq!(
+            AigEdge::new(nf.clone(), false)
+                .get_literal_res(&litmap)
+                .unwrap(),
+            LitRes::False
+        );
+        assert_eq!(
+            AigEdge::new(nf.clone(), true)
+                .get_literal_res(&litmap)
+                .unwrap(),
+            LitRes::True
+        );
+        let i1 = Rc::new(RefCell::new(AigNode::Input(1)));
+        litmap.insert(1, Lit::from(1));
+        assert_eq!(
+            AigEdge::new(i1.clone(), false)
+                .get_literal_res(&litmap)
+                .unwrap(),
+            LitRes::Lit(Lit::from(1))
+        );
+        assert_eq!(
+            AigEdge::new(i1.clone(), true)
+                .get_literal_res(&litmap)
+                .unwrap(),
+            LitRes::Lit(Lit::from(-1))
+        );
     }
 }

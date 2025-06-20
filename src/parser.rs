@@ -136,7 +136,7 @@ mod ascii {
         check_even(id)?;
         let next_id = next >> 1;
         let next_compl = next & 1 != 0;
-        Ok((id, next_id, next_compl, init))
+        Ok((id >> 1, next_id, next_compl, init))
     }
 
     fn read_latches(
@@ -259,58 +259,6 @@ mod ascii {
     #[cfg(test)]
     mod test {
         use super::*;
-        use crate::parser::read_u64;
-
-        #[test]
-        fn read_u64_test() {
-            assert!(read_u64("").is_err());
-            assert!(read_u64(" ").is_err());
-            assert!(read_u64(" 2").is_err());
-            assert!(read_u64("2 ").is_err());
-            assert!(read_u64("-5").is_err());
-
-            assert_eq!(read_u64("42").unwrap(), 42);
-            assert_eq!(read_u64("0").unwrap(), 0);
-        }
-
-        #[test]
-        fn header_try_from_test() {
-            assert!(Header::try_from(&"".to_string()).is_err());
-            assert!(Header::try_from(&"aag 0 0 0 0".to_string()).is_err());
-
-            let h_empty = Header {
-                _m: 0,
-                i: 0,
-                l: 0,
-                o: 0,
-                a: 0,
-            };
-
-            assert_eq!(
-                Header::try_from(&"   aag 0 0 0 0 0 ".to_string()).unwrap(),
-                h_empty
-            );
-
-            // In theory, this shouldn't work but a lot of people do not care about aig vs aag
-            // cf the official benchmarks
-            assert_eq!(
-                Header::try_from(&"aig 0 0 0 0 0".to_string()).unwrap(),
-                h_empty
-            );
-
-            assert_eq!(
-                Header::try_from(&"aag 1 18 2 0 1     ".to_string()).unwrap(),
-                Header {
-                    _m: 1,
-                    i: 18,
-                    l: 2,
-                    o: 0,
-                    a: 1
-                }
-            );
-
-            assert!(Header::try_from(&"aag 1 1 -1 1 1".to_string()).is_err());
-        }
 
         #[test]
         fn read_input_test() {
@@ -361,6 +309,33 @@ mod ascii {
             assert_eq!(
                 read_and(&"   42   5 19   ".to_string()).unwrap(),
                 (21, 2, true, 9, true)
+            );
+        }
+
+        #[test]
+        fn read_latch_test() {
+            assert!(read_latch(&"".to_string()).is_err());
+            assert!(read_latch(&" ".to_string()).is_err());
+            assert!(read_latch(&"-5".to_string()).is_err());
+            assert!(read_latch(&"3 14".to_string()).is_err());
+            assert!(read_latch(&"4 18 2".to_string()).is_err());
+            assert!(read_latch(&"3 2 1".to_string()).is_err());
+
+            assert_eq!(
+                read_latch(&"2 6".to_string()).unwrap(),
+                (1, 3, false, Some(false))
+            );
+            assert_eq!(
+                read_latch(&"6 1 1".to_string()).unwrap(),
+                (3, 0, true, Some(true))
+            );
+            assert_eq!(
+                read_latch(&"6 1 0".to_string()).unwrap(),
+                (3, 0, true, Some(false))
+            );
+            assert_eq!(
+                read_latch(&"6 1 6".to_string()).unwrap(),
+                (3, 0, true, None)
             );
         }
     }
@@ -606,8 +581,8 @@ impl Aig {
     /// Warning, this uses a homemade "parser" which isn't super well tested and
     /// definitely does not support all AIG features (only the bare minimum).
     /// We're not trying to open weird looking AIG files or do any sequential work for now.
-    pub fn from_file<P: AsRef<Path>>(path: &P) -> Result<Self> {
-        let f = File::open(path).map_err(|z| ParserError::IoError(z.to_string()))?;
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let f = File::open(path.as_ref()).map_err(|z| ParserError::IoError(z.to_string()))?;
         let reader = BufReader::new(f);
         match path.as_ref().extension().and_then(|ext| ext.to_str()) {
             Some("aag") => Aig::from_ascii(reader),
@@ -616,5 +591,61 @@ impl Aig {
                 ParserError::IoError("invalid extension, expected .aag or .aig".to_string()).into(),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn read_u64_test() {
+        assert!(read_u64("").is_err());
+        assert!(read_u64(" ").is_err());
+        assert!(read_u64(" 2").is_err());
+        assert!(read_u64("2 ").is_err());
+        assert!(read_u64("-5").is_err());
+
+        assert_eq!(read_u64("42").unwrap(), 42);
+        assert_eq!(read_u64("0").unwrap(), 0);
+    }
+
+    #[test]
+    fn header_try_from_test() {
+        assert!(Header::try_from(&"".to_string()).is_err());
+        assert!(Header::try_from(&"aag 0 0 0 0".to_string()).is_err());
+
+        let h_empty = Header {
+            _m: 0,
+            i: 0,
+            l: 0,
+            o: 0,
+            a: 0,
+        };
+
+        assert_eq!(
+            Header::try_from(&"   aag 0 0 0 0 0 ".to_string()).unwrap(),
+            h_empty
+        );
+
+        // In theory, this shouldn't work but a lot of people do not care about aig vs aag
+        // cf the official benchmarks
+        assert_eq!(
+            Header::try_from(&"aig 0 0 0 0 0".to_string()).unwrap(),
+            h_empty
+        );
+
+        assert_eq!(
+            Header::try_from(&"aag 1 18 2 0 1     ".to_string()).unwrap(),
+            Header {
+                _m: 1,
+                i: 18,
+                l: 2,
+                o: 0,
+                a: 1
+            }
+        );
+
+        assert!(Header::try_from(&"aag 1 1 -1 1 1".to_string()).is_err());
     }
 }

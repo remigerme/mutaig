@@ -426,6 +426,17 @@ impl Miter {
     /// FRAIGs: A Unifying Representation for Logic Synthesis and Verification
     /// by Alan Mishchenko, Satrajit Chatterjee, Roland Jiang, Robert Brayton.
     pub fn merge(&mut self, node_a: NodeId, node_b: NodeId, complement: bool) -> Result<()> {
+        // If nodes are false, they do not have a mapped literal.
+        // False nodes have already been merged
+        if node_a == 0 && node_b == 0 {
+            return Ok(());
+        } else if node_a == 0 || node_b == 0 {
+            return Err(AigError::InvalidState(format!(
+                "trying to merge node false with non-false node: id_a = {}, id_b = {} --- unsupported feature for now",
+                node_a, node_b
+            )));
+        }
+
         let lit_b = *self
             .litmap_b
             .get(&node_b)
@@ -443,9 +454,7 @@ impl Miter {
     /// Internally, we keep track of all equivalent nodes that have been merged before.
     ///
     /// Behavior is as follows:
-    /// - if the two nodes are false, they "can" be merged (but you will get an error
-    ///   if you try to merge them, because they are not mapped to any literal - you should not
-    ///   even try to do this anyway)
+    /// - if the two nodes are false, they can be merged
     /// - if the two nodes are the same input, they can be merged
     /// - if the two nodes are latches with the same id and equivalent next state, they can be merged.
     ///   Note that we don't care about their init values.
@@ -456,6 +465,10 @@ impl Miter {
     ///
     /// Unfortunately, it is not possible to check wether two nodes have complemented logic functions
     /// (the functions are the negation of each other).
+    ///
+    /// Also that constant signal propagation is not supported for now.
+    /// So an `AigNode::False`, and an `AigNode::And` with one fanin set to false,
+    /// are not considered mergeable.
     pub fn mergeable(&self, node_a: NodeId, node_b: NodeId) -> Result<bool> {
         let na = self
             .a
@@ -561,5 +574,60 @@ mod test {
         // a and b still will have same inputs set
         b.update();
         assert!(Miter::new(&a, &b, outputs.clone()).is_ok());
+    }
+
+    #[test]
+    fn mergeable_test() {
+        let mut a = Aig::new();
+        let a1 = a.add_node(AigNode::Input(1)).unwrap();
+        let a2 = a.add_node(AigNode::Input(2)).unwrap();
+        let a3 = a
+            .add_node(AigNode::And {
+                id: 3,
+                fanin0: AigEdge::new(a1.clone(), false),
+                fanin1: AigEdge::new(a2.clone(), false),
+            })
+            .unwrap();
+        let _a4 = a.add_node(AigNode::Latch {
+            id: 4,
+            next: AigEdge::new(a3.clone(), true),
+            init: None,
+        });
+        a.add_output(4, false).unwrap();
+
+        let mut b = Aig::new();
+        let b1 = b.add_node(AigNode::Input(1)).unwrap();
+        let b2 = b.add_node(AigNode::Input(2)).unwrap();
+        let b3 = b
+            .add_node(AigNode::And {
+                id: 3,
+                fanin0: AigEdge::new(b2.clone(), false),
+                fanin1: AigEdge::new(b1.clone(), false),
+            })
+            .unwrap();
+        let _b4 = b.add_node(AigNode::Latch {
+            id: 4,
+            next: AigEdge::new(b3.clone(), true),
+            init: Some(true), // init value does not matter
+        });
+        b.add_output(4, false).unwrap();
+
+        let outputs = HashMap::from([((4, false), (4, false))]);
+        let mut miter = Miter::new(&a, &b, outputs).unwrap();
+
+        assert!(!miter.mergeable(1, 2).unwrap());
+        assert!(!miter.mergeable(2, 1).unwrap());
+        assert!(!miter.mergeable(1, 2).unwrap());
+        assert!(!miter.mergeable(3, 3).unwrap()); // We haven't proven equivalence of inputs yet
+        assert!(!miter.mergeable(4, 4).unwrap());
+
+        assert!(miter.mergeable(1, 1).unwrap());
+        assert!(miter.mergeable(2, 2).unwrap());
+        miter.merge(1, 1, false).unwrap();
+        miter.merge(2, 2, false).unwrap();
+        assert!(miter.mergeable(3, 3).unwrap());
+        miter.merge(3, 3, false).unwrap();
+        assert!(miter.mergeable(4, 4).unwrap()); // init values do not matter
+        miter.merge(4, 4, false).unwrap();
     }
 }
