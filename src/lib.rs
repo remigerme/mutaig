@@ -571,6 +571,30 @@ impl Aig {
     }
 }
 
+impl PartialEq for Aig {
+    /// Compares the two AIGs. They are equal iff:
+    /// - their inputs are equal (in terms of set)
+    /// - their outputs are equal
+    /// - their latches are equal
+    /// - their valid nodes are equal.
+    fn eq(&self, other: &Self) -> bool {
+        self.outputs == other.outputs
+            && self.inputs == other.inputs
+            && self.latches == other.latches
+            && true
+            && self
+                .nodes
+                .iter()
+                .filter_map(|(&id, weak)| Some((id, weak.upgrade()?)))
+                .collect::<HashMap<NodeId, AigNodeRef>>()
+                == other
+                    .nodes
+                    .iter()
+                    .filter_map(|(&id, weak)| Some((id, weak.upgrade()?)))
+                    .collect::<HashMap<NodeId, AigNodeRef>>()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -773,5 +797,54 @@ mod test {
         assert!(aig.get_node(2).is_some());
         assert!(aig.get_node(3).is_some());
         assert!(aig.get_node(5).is_some());
+    }
+
+    #[test]
+    fn aig_eq_test() {
+        let mut a = Aig::new();
+        let a1 = a.add_node(AigNode::Input(1)).unwrap();
+        let a2 = a.add_node(AigNode::Input(2)).unwrap();
+        let a3 = a
+            .add_node(AigNode::And {
+                id: 3,
+                fanin0: AigEdge::new(a1.clone(), false),
+                fanin1: AigEdge::new(a2.clone(), false),
+            })
+            .unwrap();
+        let _a4 = a.add_node(AigNode::Latch {
+            id: 4,
+            next: AigEdge::new(a3.clone(), true),
+            init: None,
+        });
+        // Do not save the node - or drop it explicitly later
+        a.add_node(AigNode::And {
+            id: 5,
+            fanin0: AigEdge::new(a1.clone(), true),
+            fanin1: AigEdge::new(a2.clone(), true),
+        })
+        .unwrap();
+        a.add_output(4, false).unwrap();
+
+        let mut b = Aig::new();
+        let b1 = b.add_node(AigNode::Input(1)).unwrap();
+        let b2 = b.add_node(AigNode::Input(2)).unwrap();
+        let b3 = b
+            .add_node(AigNode::And {
+                id: 3,
+                fanin0: AigEdge::new(b1.clone(), false),
+                fanin1: AigEdge::new(b2.clone(), false),
+            })
+            .unwrap();
+        let _b4 = b.add_node(AigNode::Latch {
+            id: 4,
+            next: AigEdge::new(b3.clone(), true),
+            init: None,
+        });
+        b.add_output(4, false).unwrap();
+
+        a.update();
+        b.update();
+
+        assert_eq!(a, b);
     }
 }
