@@ -96,7 +96,7 @@ pub enum FaninId {
 /// let fanin_true = AigEdge::new(node_false.clone(), true);
 /// assert_eq!(fanin_false, !fanin_true);
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq)]
 pub struct AigEdge {
     /// The node the edge is refering to.
     /// It is wrapped in Rc<RefCell<_>> to allow multiple nodes refering to it.
@@ -111,6 +111,13 @@ impl Not for AigEdge {
     fn not(mut self) -> Self::Output {
         self.complement = !self.complement;
         self
+    }
+}
+
+impl PartialEq for AigEdge {
+    fn eq(&self, other: &Self) -> bool {
+        self.complement == other.complement
+            && self.node.borrow().get_id() == other.node.borrow().get_id()
     }
 }
 
@@ -846,5 +853,56 @@ mod test {
         b.update();
 
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn aig_neq_test() {
+        let mut a = Aig::new();
+        let mut b = Aig::new();
+
+        let a1 = a.add_node(AigNode::Input(1)).unwrap();
+        let b2 = b.add_node(AigNode::Input(2)).unwrap();
+
+        assert_ne!(a, b);
+
+        let a2 = a.add_node(AigNode::Input(2)).unwrap();
+        let b1 = b.add_node(AigNode::Input(1)).unwrap();
+
+        assert_eq!(a, b);
+
+        let _a3 = a
+            .add_node(AigNode::And {
+                id: 3,
+                fanin0: AigEdge::new(a1.clone(), false),
+                fanin1: AigEdge::new(a2.clone(), false),
+            })
+            .unwrap();
+        let _b3 = b
+            .add_node(AigNode::And {
+                id: 3,
+                fanin0: AigEdge::new(b2.clone(), false),
+                fanin1: AigEdge::new(b1.clone(), false),
+            })
+            .unwrap();
+
+        assert_ne!(a, b);
+
+        let mut c = Aig::new();
+        let mut d = Aig::new();
+
+        let cf = c.add_node(AigNode::False).unwrap();
+        let df = d.add_node(AigNode::False).unwrap();
+        c.add_node(AigNode::Latch {
+            id: 1,
+            next: AigEdge::new(cf.clone(), false),
+            init: None,
+        })
+        .unwrap();
+        d.add_node(AigNode::Latch {
+            id: 1,
+            next: AigEdge::new(df.clone(), false),
+            init: Some(false),
+        })
+        .unwrap();
     }
 }
