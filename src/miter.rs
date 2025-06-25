@@ -525,6 +525,16 @@ impl Miter {
             _ => Ok(false),
         }
     }
+
+    /// Returns true iff all outputs have been merged ie circuits are equivalent.
+    pub fn are_outputs_merged(&self) -> bool {
+        for out in self.a.get_outputs() {
+            if !self.merged_a.contains(&out.get_node().borrow().get_id()) {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 #[cfg(test)]
