@@ -82,6 +82,16 @@ pub enum FaninId {
     Fanin1,
 }
 
+impl From<bool> for FaninId {
+    fn from(value: bool) -> Self {
+        if value {
+            FaninId::Fanin1
+        } else {
+            FaninId::Fanin0
+        }
+    }
+}
+
 /// A directed edge representing a fanin for AIG nodes.
 ///
 /// The edge can carry an inverter according to the value of `complement`.
