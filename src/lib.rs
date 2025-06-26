@@ -175,12 +175,44 @@ pub type AigNodeRef = Rc<RefCell<AigNode>>;
 type AigNodeWeak = Weak<RefCell<AigNode>>;
 
 impl AigNode {
+    pub fn is_false(&self) -> bool {
+        matches!(self, AigNode::False)
+    }
+
+    pub fn is_input(&self) -> bool {
+        matches!(self, AigNode::Input(_))
+    }
+
+    pub fn is_latch(&self) -> bool {
+        matches!(self, AigNode::Latch { .. })
+    }
+
+    pub fn is_and(&self) -> bool {
+        matches!(self, AigNode::And { .. })
+    }
+
     pub fn get_id(&self) -> NodeId {
         match *self {
             AigNode::False => 0,
             AigNode::Input(id) => id,
             AigNode::Latch { id, .. } => id,
             AigNode::And { id, .. } => id,
+        }
+    }
+
+    /// **WARNING**
+    ///
+    /// You should ABSOLUTELY maintain the owning AIG structure invariants.
+    /// Make sure you update the [`Aig::nodes`] map with the new id.
+    ///
+    /// This function was originally proposed to implement [`Aig::minimize_ids`].
+    fn set_id(&mut self, id: NodeId) -> Result<()> {
+        match self {
+            AigNode::And { id: eid, .. } => Ok(*eid = id),
+            _ => Err(AigError::InvalidState(format!(
+                "you are trying to rewrite id of false/input/latch node with current id={}, there is no good reason you are trying to do that",
+                self.get_id()
+            ))),
         }
     }
 
@@ -513,6 +545,52 @@ impl Aig {
         };
 
         parent.borrow_mut().set_fanin(&fanin, fanin_id)
+    }
+
+    /// Minimize ids of gates (as they would be stored in AIGER format):
+    /// - check false node exists
+    /// - check inputs and latches are in order
+    /// - minimize ids of AND gates to match their id in AIGER format
+    pub fn minimize_ids(&mut self) -> Result<()> {
+        self.update();
+
+        // All inputs and latches should be there
+        let i = self.inputs.len() as u64;
+        let l = self.latches.len() as u64;
+
+        // Checking constant node
+        if self.get_node(0).map(|n| n.borrow().is_false()) != Some(true) {
+            return Err(AigError::NodeDoesNotExist(0));
+        }
+        // Checking inputs
+        for k in 0..i {
+            if self.get_node(1 + k).map(|n| n.borrow().is_input()) != Some(true) {
+                return Err(AigError::NodeDoesNotExist(1 + k));
+            }
+        }
+        // Checking latches
+        for k in 0..l {
+            if self.get_node(1 + i + k).map(|n| n.borrow().is_latch()) != Some(true) {
+                return Err(AigError::NodeDoesNotExist(1 + i + k));
+            }
+        }
+
+        // We need to renumber the AND gates.
+        // Let's prepare the nodes in the right order.
+        let mut node_ids: Vec<NodeId> = self.nodes.keys().copied().collect();
+        node_ids.sort();
+
+        for idx in 1 + i + l..node_ids.len() as u64 {
+            let old_idx = node_ids[idx as usize];
+
+            // Updating node idx and aig map
+            // Using unwrap because we previously updated the AIG structure
+            let node = self.nodes.remove(&old_idx).unwrap().upgrade().unwrap();
+            node.borrow_mut().set_id(idx)?;
+            self.nodes.insert(idx, Rc::downgrade(&node));
+        }
+
+        self.check_integrity()
     }
 
     /// Checking if the AIG structure is correct.
@@ -914,5 +992,93 @@ mod test {
             init: Some(false),
         })
         .unwrap();
+    }
+
+    #[test]
+    fn mut_id_test() {
+        let mut aig = Aig::new();
+        let i1 = aig.add_node(AigNode::Input(1)).unwrap();
+        assert!(i1.borrow_mut().set_id(2).is_err()); // not allowed to rewrite input
+        let i2 = aig.add_node(AigNode::Input(2)).unwrap();
+        let a3 = aig
+            .add_node(AigNode::And {
+                id: 3,
+                fanin0: AigEdge::new(i1.clone(), false),
+                fanin1: AigEdge::new(i2.clone(), false),
+            })
+            .unwrap();
+        let a4 = aig
+            .add_node(AigNode::And {
+                id: 4,
+                fanin0: AigEdge::new(a3.clone(), false),
+                fanin1: AigEdge::new(i2.clone(), false),
+            })
+            .unwrap();
+
+        let a4_ = a4.clone();
+        a3.borrow_mut().set_id(5).unwrap();
+        assert_eq!(a4, a4_);
+        assert!(aig.check_integrity().is_err()); // nodes map have not been updated
+        aig.nodes.insert(5, Rc::downgrade(&a3));
+        aig.nodes.remove(&3);
+        assert!(aig.check_integrity().is_ok());
+    }
+
+    #[test]
+    fn minimize_ids_test() {
+        let mut a = Aig::new();
+        let i1 = a.add_node(AigNode::Input(1)).unwrap();
+        let _i2 = a.add_node(AigNode::Input(2)).unwrap(); // not used to check if kept alive
+        let l3 = a
+            .add_node(AigNode::Latch {
+                id: 3,
+                next: AigEdge::new(i1.clone(), true),
+                init: None,
+            })
+            .unwrap();
+        let a8 = a
+            .add_node(AigNode::And {
+                id: 8,
+                fanin0: AigEdge::new(i1.clone(), false),
+                fanin1: AigEdge::new(l3.clone(), false),
+            })
+            .unwrap();
+        let _a15 = a
+            .add_node(AigNode::And {
+                id: 15,
+                fanin0: AigEdge::new(a8.clone(), false),
+                fanin1: AigEdge::new(i1.clone(), true),
+            })
+            .unwrap();
+        a.add_output(15, false).unwrap();
+        a.minimize_ids().unwrap();
+
+        let mut b = Aig::new();
+        let b1 = b.add_node(AigNode::Input(1)).unwrap();
+        let _b2 = b.add_node(AigNode::Input(2)).unwrap(); // not used to check if kept alive
+        let b3 = b
+            .add_node(AigNode::Latch {
+                id: 3,
+                next: AigEdge::new(b1.clone(), true),
+                init: None,
+            })
+            .unwrap();
+        let b4 = b
+            .add_node(AigNode::And {
+                id: 4,
+                fanin0: AigEdge::new(b1.clone(), false),
+                fanin1: AigEdge::new(b3.clone(), false),
+            })
+            .unwrap();
+        let _b5 = b
+            .add_node(AigNode::And {
+                id: 5,
+                fanin0: AigEdge::new(b4.clone(), false),
+                fanin1: AigEdge::new(b1.clone(), true),
+            })
+            .unwrap();
+        b.add_output(5, false).unwrap();
+
+        assert_eq!(a, b);
     }
 }
