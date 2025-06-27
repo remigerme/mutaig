@@ -1,6 +1,6 @@
 use std::{fs::File, io::BufReader, path::Path};
 
-use crate::{Aig, AigEdge, AigNode, NodeId, ParserError, Result};
+use crate::{Aig, ParserError, Result};
 
 fn read_u64(s: &str) -> std::result::Result<u64, ParserError> {
     s.parse::<u64>()
@@ -63,8 +63,8 @@ impl TryFrom<&String> for Header {
 /// Parser for the ASCII AIGER format.
 mod ascii {
     use crate::{
-        Aig, NodeId, ParserError, Result,
-        parser::{Header, build_aig, check_even, read_u64},
+        Aig, AigEdge, AigNode, NodeId, ParserError, Result,
+        parser::{Header, check_even, read_u64},
     };
     use std::io::{BufRead, BufReader, Read};
 
@@ -233,6 +233,67 @@ mod ascii {
         Ok(ands)
     }
 
+    /// Builder for the AIGER format.
+    fn build_aig(
+        inputs: Vec<NodeId>,
+        latches: Vec<(NodeId, NodeId, bool, Option<bool>)>,
+        outputs: Vec<(NodeId, bool)>,
+        ands: Vec<(NodeId, NodeId, bool, NodeId, bool)>,
+    ) -> Result<Aig> {
+        let mut aig = Aig::new();
+
+        // First, the constant node false
+        let node_false = aig.add_node(AigNode::False).unwrap();
+
+        // Starting by inputs
+        for &id in &inputs {
+            aig.add_node(AigNode::Input(id))?;
+        }
+
+        // Adding latches
+        // First step: add and nodes with dummy edges to node false
+        for &(id, _, _, init) in &latches {
+            aig.add_node(AigNode::Latch {
+                id: id,
+                next: AigEdge::new(node_false.clone(), false),
+                init: init,
+            })?;
+        }
+
+        // Adding and gates
+        // First step: add and nodes with dummy edges to node false
+        for &(id, _, _, _, _) in &ands {
+            aig.add_node(AigNode::And {
+                id: id,
+                fanin0: AigEdge::new(node_false.clone(), false),
+                fanin1: AigEdge::new(node_false.clone(), false),
+            })?;
+        }
+        // Then replace with real edges
+        for &(id, fanin0_id, fanin0_complement, fanin1_id, fanin1_complement) in &ands {
+            aig.replace_fanin(id, crate::FaninId::Fanin0, fanin0_id, fanin0_complement)?;
+            aig.replace_fanin(id, crate::FaninId::Fanin1, fanin1_id, fanin1_complement)?;
+        }
+
+        // Edit the fanin of the latches
+        for &(id, next_id, next_compl, _) in &latches {
+            aig.replace_fanin(id, crate::FaninId::Fanin0, next_id, next_compl)?;
+        }
+
+        // And finally marking outputs
+        for &(id, compl) in &outputs {
+            aig.add_output(id, compl)?;
+        }
+
+        // Let's clean the useless stuff
+        aig.update();
+
+        // Is the AIG okay?
+        aig.check_integrity()?;
+
+        Ok(aig)
+    }
+
     impl Aig {
         /// Creates an AIG from an open .aag file using ASCII format.
         ///
@@ -346,15 +407,16 @@ mod bin {
     use std::io::{BufRead, BufReader, Read};
 
     use crate::{
-        Aig, NodeId, ParserError, Result,
-        parser::{Header, build_aig, read_u64},
+        Aig, AigEdge, AigError, AigNode, NodeId, ParserError, Result,
+        parser::{Header, read_u64},
     };
 
-    fn read_latch(
+    fn read_and_partially_register_latch(
+        aig: &mut Aig,
         lvar: u64,
         header: Header,
         line: &String,
-    ) -> Result<(NodeId, NodeId, bool, Option<bool>)> {
+    ) -> Result<(NodeId, NodeId, bool)> {
         let tokens = line.trim().split_whitespace().collect::<Vec<&str>>();
 
         if tokens.len() < 1 {
@@ -386,21 +448,33 @@ mod bin {
         } else {
             Ok(Some(false))
         }?;
+        let id = header.i + lvar + 1;
         let next_id = next >> 1;
         let next_compl = next & 1 != 0;
-        Ok((header.i + lvar + 1, next_id, next_compl, init))
+
+        // Partially registering latch with a dummy fanin
+        let dummy = aig.get_node(0).unwrap();
+        aig.add_node(AigNode::Latch {
+            id,
+            next: AigEdge::new(dummy, false),
+            init,
+        })?;
+
+        // Returning the fanin information for later
+        Ok((id, next_id, next_compl))
     }
 
-    fn read_latches(
+    fn read_and_partially_register_latches(
+        aig: &mut Aig,
         reader: &mut BufReader<impl Read>,
         header: Header,
-    ) -> Result<Vec<(NodeId, NodeId, bool, Option<bool>)>> {
+    ) -> Result<Vec<(NodeId, NodeId, bool)>> {
         let mut latches = Vec::new();
         let mut line = String::new();
 
         for lvar in 0..header.l {
             reader.read_line(&mut line).unwrap();
-            latches.push(read_latch(lvar, header, &line)?);
+            latches.push(read_and_partially_register_latch(aig, lvar, header, &line)?);
             line.clear();
         }
         Ok(latches)
@@ -469,11 +543,11 @@ mod bin {
         Ok(x)
     }
 
-    fn read_ands(
+    fn read_and_register_ands(
+        aig: &mut Aig,
         reader: &mut BufReader<impl Read>,
         header: Header,
-    ) -> Result<Vec<(NodeId, NodeId, bool, NodeId, bool)>> {
-        let mut ands = Vec::new();
+    ) -> Result<()> {
         let mut buf = Vec::new();
         reader.read_to_end(&mut buf).unwrap();
 
@@ -487,12 +561,24 @@ mod bin {
             let rhs0 = lhs - delta0;
             let rhs1 = rhs0 - delta1;
 
-            ands.push((lhs >> 1, rhs0 >> 1, rhs0 & 1 != 0, rhs1 >> 1, rhs1 & 1 != 0));
+            aig.add_node(AigNode::And {
+                id: lhs >> 1,
+                fanin0: AigEdge::new(
+                    aig.get_node(rhs0 >> 1)
+                        .ok_or(AigError::NodeDoesNotExist(rhs0 >> 1))?,
+                    rhs0 & 1 != 0,
+                ),
+                fanin1: AigEdge::new(
+                    aig.get_node(rhs1 >> 1)
+                        .ok_or(AigError::NodeDoesNotExist(rhs1 >> 1))?,
+                    rhs1 & 1 != 0,
+                ),
+            })?;
 
             lhs += 2;
         }
 
-        Ok(ands)
+        Ok(())
     }
 
     impl Aig {
@@ -504,75 +590,43 @@ mod bin {
             let header: Header = Header::try_from(&line)?;
             line.clear();
 
-            let inputs = (1..header.i + 1).collect::<Vec<NodeId>>();
-            let latches = read_latches(&mut reader, header)?;
-            let outputs = read_outputs(&mut reader, header)?;
-            let ands = read_ands(&mut reader, header)?;
+            // Using the binary AIGER format, the AIGER can be built progressively.
+            // False node included by the ctor.
+            let mut aig = Aig::new();
 
-            build_aig(inputs, latches, outputs, ands)
+            // Adding inputs
+            for i in 1..1 + header.i {
+                aig.add_node(AigNode::Input(i))?;
+            }
+
+            // Register latches and collecting their fanin
+            let latches = read_and_partially_register_latches(&mut aig, &mut reader, header)?;
+
+            // Collecting outputs for later
+            let outputs = read_outputs(&mut reader, header)?;
+
+            // Register and gates
+            read_and_register_ands(&mut aig, &mut reader, header)?;
+
+            // Edit the fanin of the latches
+            for &(id, next_id, next_compl) in &latches {
+                aig.replace_fanin(id, crate::FaninId::Fanin0, next_id, next_compl)?;
+            }
+
+            // And finally marking outputs
+            for &(id, compl) in &outputs {
+                aig.add_output(id, compl)?;
+            }
+
+            // Let's clean the useless stuff
+            aig.update();
+
+            // Is the AIG okay?
+            aig.check_integrity()?;
+
+            Ok(aig)
         }
     }
-}
-
-/// Builder for the AIGER format.
-fn build_aig(
-    inputs: Vec<NodeId>,
-    latches: Vec<(NodeId, NodeId, bool, Option<bool>)>,
-    outputs: Vec<(NodeId, bool)>,
-    ands: Vec<(NodeId, NodeId, bool, NodeId, bool)>,
-) -> Result<Aig> {
-    let mut aig = Aig::new();
-
-    // First, the constant node false
-    let node_false = aig.add_node(AigNode::False).unwrap();
-
-    // Starting by inputs
-    for &id in &inputs {
-        aig.add_node(AigNode::Input(id))?;
-    }
-
-    // Adding latches
-    // First step: add and nodes with dummy edges to node false
-    for &(id, _, _, init) in &latches {
-        aig.add_node(AigNode::Latch {
-            id: id,
-            next: AigEdge::new(node_false.clone(), false),
-            init: init,
-        })?;
-    }
-
-    // Adding and gates
-    // First step: add and nodes with dummy edges to node false
-    for &(id, _, _, _, _) in &ands {
-        aig.add_node(AigNode::And {
-            id: id,
-            fanin0: AigEdge::new(node_false.clone(), false),
-            fanin1: AigEdge::new(node_false.clone(), false),
-        })?;
-    }
-    // Then replace with real edges
-    for &(id, fanin0_id, fanin0_complement, fanin1_id, fanin1_complement) in &ands {
-        aig.replace_fanin(id, crate::FaninId::Fanin0, fanin0_id, fanin0_complement)?;
-        aig.replace_fanin(id, crate::FaninId::Fanin1, fanin1_id, fanin1_complement)?;
-    }
-
-    // Edit the fanin of the latches
-    for &(id, next_id, next_compl, _) in &latches {
-        aig.replace_fanin(id, crate::FaninId::Fanin0, next_id, next_compl)?;
-    }
-
-    // And finally marking outputs
-    for &(id, compl) in &outputs {
-        aig.add_output(id, compl)?;
-    }
-
-    // Let's clean the useless stuff
-    aig.update();
-
-    // Is the AIG okay?
-    aig.check_integrity()?;
-
-    Ok(aig)
 }
 
 impl Aig {
