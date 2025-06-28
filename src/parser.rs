@@ -430,16 +430,21 @@ mod bin {
             .into());
         }
 
+        let id = header.i + lvar + 1;
         let next = read_u64(tokens[0])?;
+        let next_id = next >> 1;
+        let next_compl = next & 1 != 0;
+
         let init = if tokens.len() > 1 {
             let res = read_u64(tokens[1])?;
             if res == 0 {
                 Ok(Some(false))
             } else if res == 1 {
                 Ok(Some(true))
-            } else if res == lvar {
+            } else if res == (id << 1) {
                 Ok(None)
             } else {
+                eprintln!("{}, {}", res, id);
                 Err(ParserError::InvalidToken(
                     "expected 0 1 or latch id for latch initialization, got ".to_string()
                         + tokens[1],
@@ -448,9 +453,6 @@ mod bin {
         } else {
             Ok(Some(false))
         }?;
-        let id = header.i + lvar + 1;
-        let next_id = next >> 1;
-        let next_compl = next & 1 != 0;
 
         // Partially registering latch with a dummy fanin
         let dummy = aig.get_node(0).unwrap();
