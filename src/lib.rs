@@ -1,3 +1,8 @@
+//! THIS BRANCH IS WORK IN PROGRESS IF NEEDED LATER
+//! DO WE REALLY NEED TO REPLACE ONE NODE BY NEGATION-EQUIVALENT NODE?
+//! APPARENTLY IN PRACTICE NO.
+//! IF YES, THIS IS A DRAFT IMPLEMENTATION.
+
 pub mod cnf;
 pub mod dfs;
 pub mod miter;
@@ -165,6 +170,7 @@ pub enum AigNode {
         id: NodeId,
         fanin0: AigEdge,
         fanin1: AigEdge,
+        fanouts: Vec<AigNodeWeak>,
     },
 }
 
@@ -200,6 +206,13 @@ impl AigNode {
         }
     }
 
+    pub fn get_and_fanouts(&self) -> Vec<AigNodeWeak> {
+        match self {
+            AigNode::And { fanouts, .. } => fanouts.clone(),
+            _ => vec![],
+        }
+    }
+
     /// **WARNING**
     ///
     /// You should ABSOLUTELY maintain the owning AIG structure invariants.
@@ -230,6 +243,55 @@ impl AigNode {
             (AigNode::And { fanin1, .. }, FaninId::Fanin1) => Ok(*fanin1 = fanin.clone()),
             (AigNode::Latch { next, .. }, FaninId::Fanin0) => Ok(*next = fanin.clone()),
             _ => Err(AigError::NoFanin),
+        }
+    }
+
+    /// Invert signal of fanin of the current node from node child_id.
+    fn invert_edge(&mut self, child_id: NodeId) -> Result<()> {
+        match self {
+            AigNode::And {
+                id, fanin0, fanin1, ..
+            } => {
+                let mut found = false;
+                if fanin0.get_node().borrow().get_id() == child_id {
+                    found = true;
+                    fanin0.complement = !fanin0.complement;
+                }
+                if fanin1.get_node().borrow().get_id() == child_id {
+                    found = true;
+                    fanin1.complement = !fanin1.complement;
+                }
+                if found {
+                    Ok(())
+                } else {
+                    Err(AigError::InvalidState(format!(
+                        "node {} does not have fanin {}",
+                        id, child_id
+                    )))
+                }
+            }
+            AigNode::Latch { id, next, .. } => {
+                if next.get_node().borrow().get_id() == child_id {
+                    next.complement = !next.complement;
+                    Ok(())
+                } else {
+                    Err(AigError::InvalidState(format!(
+                        "node {} does not have fanin {}",
+                        id, child_id
+                    )))
+                }
+            }
+            _ => Err(AigError::InvalidState(format!(
+                "input {} has no fanin",
+                self.get_id()
+            ))),
+        }
+    }
+
+    fn update(&mut self) {
+        match self {
+            AigNode::And { fanouts, .. } => fanouts.retain(|weak| weak.upgrade().is_some()),
+            _ => (),
         }
     }
 }
@@ -293,6 +355,11 @@ impl Aig {
         // Removing no longer valid entries from the nodes
         self.nodes
             .retain(|_, weak_node| weak_node.upgrade().is_some());
+
+        // Removing dead fanouts from nodes
+        for (_, weak) in &self.nodes {
+            weak.upgrade().unwrap().borrow_mut().update();
+        }
     }
 
     /// Retrieves inputs reference.
@@ -523,8 +590,8 @@ impl Aig {
         }
     }
 
-    /// Replace the given fanin of a node by a new fanin
-    /// Both nodes need to already exist in the AIG
+    /// Replace the given fanin of a node by a new fanin.
+    /// Both nodes need to already exist in the AIG.
     pub fn replace_fanin(
         &mut self,
         parent_id: NodeId,
@@ -545,6 +612,59 @@ impl Aig {
         };
 
         parent.borrow_mut().set_fanin(&fanin, fanin_id)
+    }
+
+    /// Replace a node by another existing node.
+    /// Both nodes need to already exist in the AIG.
+    pub fn replace_node(&mut self, old_id: NodeId, id: NodeId, complement: bool) -> Result<()> {
+        // We also need to keep the map of nodes updated
+        let old = self
+            .nodes
+            .remove(&old_id)
+            .ok_or(AigError::NodeDoesNotExist(old_id))?
+            .upgrade()
+            .ok_or(AigError::InvalidState(format!(
+                "node {} is no longer valid",
+                old_id
+            )))?;
+
+        let new = self
+            .nodes
+            .remove(&id)
+            .ok_or(AigError::NodeDoesNotExist(id))?
+            .upgrade()
+            .ok_or(AigError::InvalidState(format!(
+                "node {} is no longer valid",
+                id
+            )))?;
+
+        assert!(old.borrow().is_and());
+        assert!(new.borrow().is_and());
+
+        let fanins = new.borrow().get_fanins();
+
+        old.borrow_mut().set_fanin(&fanins[0], FaninId::Fanin0)?;
+        old.borrow_mut().set_fanin(&fanins[1], FaninId::Fanin1)?;
+        old.borrow_mut().set_id(id)?;
+
+        // Keeping the map updated
+        self.nodes.insert(id, Rc::downgrade(&old));
+
+        // If complement (ie the new node is the negation of the old one), we need to update its fanout
+        if complement {
+            let fanouts: Vec<AigNodeRef> = old
+                .borrow()
+                .get_and_fanouts()
+                .iter()
+                .filter_map(|weak| weak.upgrade())
+                .collect();
+
+            for fanout in fanouts {
+                fanout.borrow_mut().invert_edge(id)?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Minimize ids of gates (as they would be stored in AIGER format):
