@@ -592,13 +592,18 @@ impl Aig {
             )))?;
 
         assert!(old.borrow().is_and());
-        assert!(new.borrow().is_and());
 
-        let fanins = new.borrow().get_fanins();
+        if new.borrow().is_and() {
+            let fanins = new.borrow().get_fanins();
 
-        old.borrow_mut().set_fanin(&fanins[0], FaninId::Fanin0)?;
-        old.borrow_mut().set_fanin(&fanins[1], FaninId::Fanin1)?;
-        old.borrow_mut().set_id(id)?;
+            old.borrow_mut().set_fanin(&fanins[0], FaninId::Fanin0)?;
+            old.borrow_mut().set_fanin(&fanins[1], FaninId::Fanin1)?;
+            old.borrow_mut().set_id(id)?;
+        } else if new.borrow().is_false() || new.borrow().is_input() {
+            old.borrow_mut().set_id(id)?;
+        } else {
+            panic!("replacing latch: unsupported features for now");
+        }
 
         // Keeping the map updated
         self.nodes.insert(id, Rc::downgrade(&old));
