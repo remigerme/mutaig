@@ -277,8 +277,6 @@ impl Miter {
         }
 
         Ok(())
-
-        // Adding the
     }
 
     /// Generates one modular SAT query to try to prove two internal signals of the AIGs are equivalent.
@@ -437,6 +435,8 @@ impl Miter {
             )));
         }
 
+        eprintln!("{:?}", self.litmap_b);
+
         let lit_b = *self
             .litmap_b
             .get(&node_b)
@@ -456,8 +456,10 @@ impl Miter {
     /// Behavior is as follows:
     /// - if the two nodes are false, they can be merged
     /// - if the two nodes are the same input, they can be merged
-    /// - if the two nodes are latches with the same id and equivalent next state, they can be merged.
-    ///   Note that we don't care about their init values.
+    /// - if the two nodes are latches with the same id they can be merged.
+    ///   Note that we don't care about their init values nor their next state.
+    ///   Indeed, here merging them allow us to consider as pseudo inputs.
+    ///   Their next state will be added as pseudo outputs to be checked when calling [`Miter::extract_cnf`].
     /// - if the two nodes are and gates, we check if they have the same output function,
     ///   regardless of their fanins order for example. We also deal with complemented equivalence.
     ///   For example, a = b ^ c and a' = c' ^ not(b') are equivalent if b is equivalent to not(b')
@@ -508,17 +510,11 @@ impl Miter {
                     || (self.merged.contains(&(id0a, id1b, c0a ^ c1b))
                         && self.merged.contains(&(id1a, id0b, c1a ^ c0b))))
             }
-            // Ignoring init values for latches
-            // Latches must be equal (without complement)
-            (AigNode::Latch { next: next_a, .. }, AigNode::Latch { next: next_b, .. }) => {
-                Ok(node_a == node_b
-                    && self.merged.contains(&(
-                        next_a.get_node().borrow().get_id(),
-                        next_b.get_node().borrow().get_id(),
-                        false,
-                    )))
+            // Ignoring init values for latches and next state, they are pseudo inputs.
+            (AigNode::Latch { id: id_a, .. }, AigNode::Latch { id: id_b, .. }) => {
+                Ok(*id_a == *id_b)
             }
-            (AigNode::Input(..), AigNode::Input(..)) => Ok(node_a == node_b),
+            (AigNode::Input(id_a), AigNode::Input(id_b)) => Ok(*id_a == *id_b),
             (AigNode::False, AigNode::False) => Ok(true),
             // Some others merge could be considered, but let's not consider them for now.
             // Example: constant signal propagation
@@ -527,6 +523,9 @@ impl Miter {
     }
 
     /// Returns true iff all outputs have been merged ie circuits are equivalent.
+    ///
+    /// **WARNING**  
+    /// For now, consider only real outputs and not pseudo outputs induced by latches. TODO?
     pub fn are_outputs_merged(&self) -> bool {
         for out in self.a.get_outputs() {
             if !self.merged_a.contains(&out.get_node().borrow().get_id()) {
@@ -617,8 +616,8 @@ mod test {
             .unwrap();
         let _b4 = b.add_node(AigNode::Latch {
             id: 4,
-            next: AigEdge::new(b3.clone(), true),
-            init: Some(true), // init value does not matter
+            next: AigEdge::new(b3.clone(), false), // next do not matter
+            init: Some(true),                      // init value does not matter
         });
         b.add_output(4, false).unwrap();
 
@@ -629,7 +628,7 @@ mod test {
         assert!(!miter.mergeable(2, 1).unwrap());
         assert!(!miter.mergeable(1, 2).unwrap());
         assert!(!miter.mergeable(3, 3).unwrap()); // We haven't proven equivalence of inputs yet
-        assert!(!miter.mergeable(4, 4).unwrap());
+        assert!(miter.mergeable(4, 4).unwrap());
 
         assert!(miter.mergeable(1, 1).unwrap());
         assert!(miter.mergeable(2, 2).unwrap());
