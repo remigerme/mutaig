@@ -2,15 +2,18 @@ use std::{fmt::Display, ops::Add};
 
 use crate::{Aig, AigEdge, AigNode, dfs::Dfs, miter::Miter};
 
+// Definining default global style.
+const DEFAULT_RANKDIR: &str = "BT";
+
 // Defining default style for nodes.
-const DEFAULT_FALSE_NODE_FORMAT: &str = "";
-const DEFAULT_INPUT_NODE_FORMAT: &str = " [shape=box] ";
-const DEFAULT_LATCH_NODE_FORMAT: &str = " [shape=diamond] ";
-const DEFAULT_AND_NODE_FORMAT: &str = " [shape=circle] ";
+const DEFAULT_FALSE_NODE_FORMAT: &str = "[shape=point, label=\"GND\", width=1.5]";
+const DEFAULT_INPUT_NODE_FORMAT: &str = "[shape=box]";
+const DEFAULT_LATCH_NODE_FORMAT: &str = "[shape=diamond]";
+const DEFAULT_AND_NODE_FORMAT: &str = "[shape=circle]";
 const DEFAULT_XOR_NODE_FORMAT: &str = "";
 const DEFAULT_OR_NODE_FORMAT: &str = "";
 /// See https://stackoverflow.com/questions/50822798/how-to-use-graphviz-to-draw-a-node-pointed-by-an-arrow.
-const DEFAULT_OUTPUT_NODE_FORMAT: &str = " [shape=none, height=.0, width=.0] ";
+const DEFAULT_OUTPUT_NODE_FORMAT: &str = "[shape=none, height=.0, width=.0]";
 
 // Defining default style for edges.
 const DEFAULT_EDGE_ALL_FORMAT: &str = "[arrowsize=0.3]";
@@ -41,6 +44,12 @@ impl Display for GraphvizEdgeStyle {
     }
 }
 
+impl Default for GraphvizEdgeStyle {
+    fn default() -> Self {
+        GraphvizEdgeStyle("".to_string())
+    }
+}
+
 impl Add for GraphvizEdgeStyle {
     type Output = Self;
 
@@ -51,6 +60,10 @@ impl Add for GraphvizEdgeStyle {
 
 /// Parameters for Graphviz rendering.
 ///
+/// ### Global parameters
+/// - `rankdir`
+///
+/// ### Nodes
 /// The following nodes can be rendered using [`GraphvizNodeStyle`]:
 /// - [`AigNode::False`]
 /// - [`AigNode::Input`]
@@ -60,6 +73,9 @@ impl Add for GraphvizEdgeStyle {
 /// - `xor` gate (for miter)
 /// - `or` gate (for miter).
 pub struct GraphvizStyle {
+    // Global
+    rankdir: String,
+
     // Nodes
     cst_false: GraphvizNodeStyle,
     input: GraphvizNodeStyle,
@@ -78,6 +94,8 @@ pub struct GraphvizStyle {
 impl Default for GraphvizStyle {
     fn default() -> Self {
         GraphvizStyle {
+            rankdir: DEFAULT_RANKDIR.to_string(),
+
             cst_false: GraphvizNodeStyle(DEFAULT_FALSE_NODE_FORMAT.to_string()),
             input: GraphvizNodeStyle(DEFAULT_INPUT_NODE_FORMAT.to_string()),
             latch: GraphvizNodeStyle(DEFAULT_LATCH_NODE_FORMAT.to_string()),
@@ -94,20 +112,21 @@ impl Default for GraphvizStyle {
 }
 
 impl AigNode {
-    fn graphviz_decl(&self, graphviz_style: &GraphvizStyle) -> String {
-        let (id, style, label) = match self {
-            AigNode::False => (0, graphviz_style.cst_false.clone(), "".to_string()),
-            AigNode::Input(id) => (*id, graphviz_style.input.clone(), format!("i{}", id)),
-            AigNode::Latch { id, .. } => (*id, graphviz_style.latch.clone(), format!("l{}", id)),
-            AigNode::And { id, .. } => (*id, graphviz_style.and.clone(), "".to_string()),
+    /// Beware, [`AigNode::False`] is a special case.
+    fn graphviz_decl(&self) -> String {
+        let (id, label) = match self {
+            AigNode::False => return "0".to_string(),
+            AigNode::Input(id) => (*id, format!("i{}", id)),
+            AigNode::Latch { id, .. } => (*id, format!("l{}", id)),
+            AigNode::And { id, .. } => (*id, "".to_string()),
         };
-        format!("{} {} [label=\"{}\"]\n", id, style, label)
+        format!("{} [label=\"{}\"]\n", id, label)
     }
 }
 
 impl AigEdge {
     fn graphviz_decl(&self, to: String, to_latch: bool, graphviz_style: &GraphvizStyle) -> String {
-        let mut style = graphviz_style.edge_all.clone();
+        let mut style = GraphvizEdgeStyle::default();
         if self.complement {
             style = style + graphviz_style.edge_complement.clone();
         }
@@ -133,31 +152,44 @@ fn get_output_id(output: &AigEdge) -> String {
 
 impl Aig {
     pub fn to_dot(&self, graphviz_style: GraphvizStyle) -> String {
-        let mut s = String::new();
+        let mut decl_edges = String::new();
 
-        // DOT header
-        s.push_str("strict digraph {\n");
-        s.push_str("rankdir=\"BT\"\n");
+        // Creating different subgraphs for node declarations
+        let mut decl_false_node_optional = "".to_string();
+        let mut decl_inputs = format!("subgraph inputs {{\n node {}\n", graphviz_style.input);
+        let mut decl_latches = format!("subgraph latches {{\n node {}\n", graphviz_style.latch);
+        let mut decl_outputs = format!("subgraph outputs {{\n node {}\n", graphviz_style.output);
+        let mut decl_ands = format!("subgraph ands {{\n node {}\n", graphviz_style.and);
 
         // Adding artificial outputs to point to
         for (i, output) in self.outputs.iter().enumerate() {
             let output_id = get_output_id(output);
-            let output_decl = format!(
-                "{} {} [label=\"o{}\"]\n",
-                output_id,
-                graphviz_style.output,
-                1 + i
-            );
-            s.push_str(&output_decl);
-            s.push_str(&output.graphviz_decl(output_id, false, &graphviz_style));
+            let output_decl = format!("{} [label=\"o{}\"]\n", output_id, 1 + i);
+            decl_outputs.push_str(&output_decl);
+            decl_edges.push_str(&output.graphviz_decl(output_id, false, &graphviz_style));
         }
 
         // DFS from outputs
         let mut dfs = Dfs::from_outputs(self);
         while let Some(node) = dfs.next(self) {
-            s.push_str(&node.borrow().graphviz_decl(&graphviz_style));
+            match &*node.borrow() {
+                AigNode::False => decl_false_node_optional.push_str(&format!(
+                    "{} {}\n",
+                    node.borrow().graphviz_decl(),
+                    graphviz_style.cst_false
+                )),
+                AigNode::Input(_) => {
+                    decl_inputs.push_str(&node.borrow().graphviz_decl());
+                }
+                AigNode::Latch { .. } => {
+                    decl_latches.push_str(&node.borrow().graphviz_decl());
+                }
+                AigNode::And { .. } => {
+                    decl_ands.push_str(&node.borrow().graphviz_decl());
+                }
+            }
             for fanin in node.borrow().get_fanins() {
-                s.push_str(&fanin.graphviz_decl(
+                decl_edges.push_str(&fanin.graphviz_decl(
                     node.borrow().get_id().to_string(),
                     node.borrow().is_latch(),
                     &graphviz_style,
@@ -165,16 +197,48 @@ impl Aig {
             }
         }
 
-        // DOT footer
-        s.push('}');
-        s.push('\n');
-
-        s
+        // Concatenating everything together
+        format!(
+            "
+strict digraph {{
+    rankdir=\"{}\"
+    edge {}
+    {}
+    {}
+    }}
+    {}
+    }}
+    {}
+    }}
+    {}
+    }}
+    {}
+}}",
+            graphviz_style.rankdir,
+            graphviz_style.edge_all,
+            decl_false_node_optional,
+            decl_inputs,
+            decl_latches,
+            decl_ands,
+            decl_outputs,
+            decl_edges
+        )
     }
 }
 
 impl Miter {
     pub fn to_dot(&self, _graphviz_style: GraphvizStyle) -> String {
         todo!()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{Aig, dot::GraphvizStyle};
+
+    #[test]
+    fn d() {
+        let aig = Aig::from_file("adder.aig").unwrap();
+        eprintln!("{}", aig.to_dot(GraphvizStyle::default()));
     }
 }
