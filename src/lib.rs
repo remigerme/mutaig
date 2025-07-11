@@ -1,5 +1,6 @@
 pub mod cnf;
 pub mod dfs;
+mod dot;
 pub mod miter;
 mod parser;
 
@@ -710,6 +711,18 @@ impl Aig {
         self.nodes = new_nodes_map;
 
         self.check_integrity()
+    }
+
+    /// Tests if the current AIG nodes are in a valid AIGER format:
+    /// - constant with id $0$
+    /// - then inputs with ids $1, ..., i$
+    /// - then latches with ids $i + 1, ..., i + l + 1$
+    /// - then and gates with ids $i + l + 1, ..., i + l + a + 1$ such as for all gate z = and(a, b),
+    ///   $id(z) \gt id(a) \geq id(b)$
+    /// You can use [`Aig::minimize_ids`] to mutate the current AIG into an AIGER-compliant AIG.
+    pub fn is_valid_aiger() -> bool {
+        // todo
+        return true;
     }
 
     /// Checking if the AIG structure is correct.
