@@ -7,12 +7,12 @@
 //!
 //! If the resulting CNF is SAT, it means that the two circuits are **not equivalent**.
 //!
-//! This is already implemented in [`Miter::try_prove_eq_node`] and [`Miter::try_prove_eq`].
+//! This is already implemented in [`Miter::extract_cnf_node`] and [`Miter::extract_cnf`].
 //!
 //! [`Miter::new`]: crate::miter::Miter::new
 //! [`Cnf`]: Cnf
-//! [`Miter::try_prove_eq_node`]: crate::miter::Miter::try_prove_eq_node
-//! [`Miter::try_prove_eq`]: crate::miter::Miter::try_prove_eq
+//! [`Miter::extract_cnf_node`]: crate::miter::Miter::extract_cnf_node
+//! [`Miter::extract_cnf`]: crate::miter::Miter::extract_cnf
 
 use std::{collections::HashMap, num::TryFromIntError, ops::Not};
 

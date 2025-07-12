@@ -57,14 +57,19 @@ impl From<TryFromIntError> for MiterError {
 /// [Verification of large synthesized designs](https://doi.org/10.1109/ICCAD.1993.580110) by D. Brand.
 ///
 /// To use this struct:
-/// - create a new miter with [`new`]
-/// - (optional) merge internal nodes that you know are equivalent using [`try_prove_eq_node`]
-///   (it will incrementally simplify the search space of the generated SAT queries)
-/// - then prove the two original AIGs are equivalent using [`try_prove_eq`].
+/// - create a new miter with [`Miter::new`]
+/// - (optional) merge internal nodes: verify they are equivalent using [`extract_cnf_node`],
+///   and use [`merge`] if the extracted formula was UNSAT (it will incrementally simplify
+///   the search space of the generated SAT queries). In case of an obvious merging,
+///   you can also use [`mergeable`] to determine wether two nodes can be obviously merged.
+/// - then prove the two original AIGs are equivalent using [`extract_cnf`]:
+///   if the extracted formula is UNSAT, AIGs are equivalent. Else if it is SAT, then
+///   you have determined an input vector on which the AIGs differ.
 ///
-/// [`new`]: Miter::new
-/// [`try_prove_eq_node`]: Miter::try_prove_eq_node
-/// [`try_prove_eq`]: Miter::try_prove_eq
+/// [`extract_cnf_node`]: Miter::extract_cnf_node
+/// [`merge`]: Miter::merge
+/// [`mergeable`]: Miter::mergeable
+/// [`extract_cnf`]: Miter::extract_cnf
 pub struct Miter {
     /// The reference miter.
     /// Public for crate because it is required for [`Miter::to_dot`], implemented in [`crate::dot`].
