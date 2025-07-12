@@ -1,6 +1,6 @@
 pub mod cnf;
 pub mod dfs;
-mod dot;
+pub mod dot;
 pub mod miter;
 mod parser;
 

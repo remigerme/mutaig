@@ -1,3 +1,30 @@
+//! You can also export AIGs and miters to the Graphviz dot format using their `to_dot` methods: [`Aig::to_dot`], [`Miter::to_dot`].
+//!
+//! ```rust
+//! use mutaig::Aig;
+//! use mutaig::miter::Miter;
+//! use mutaig::dot::GraphvizStyle;
+//!
+//! let aig = Aig::from_file("assets/circuits/half-adder.aag").unwrap();
+//! println!("{}", aig.to_dot(GraphvizStyle::default()));
+//!
+//! // Creating a miter between two copies of the circuit
+//! let outputs_map = aig
+//!     .get_outputs()
+//!     .iter()
+//!     .map(|edge| {
+//!         let id = edge.get_node().borrow().get_id();
+//!         let b = edge.get_complement();
+//!         ((id, b), (id, b))
+//!     })
+//!     .collect();
+//!
+//! let miter = Miter::new(&aig, &aig, outputs_map).unwrap();
+//! println!("{}", miter.to_dot(GraphvizStyle::default()));
+//! ```
+//!
+//! You can then render the graphs using the DOT engine.
+
 use std::{fmt::Display, ops::Add};
 
 use crate::{Aig, AigEdge, AigNode, NodeId, dfs::Dfs, miter::Miter};
@@ -74,6 +101,12 @@ impl Add for GraphvizEdgeStyle {
 /// - output (by default, invisible node just to get an arrow)
 /// - `xor` gate (for miter)
 /// - `or` gate (for miter).
+///  
+/// ### Edges
+/// Edge styles are additive. All edges implement the `edge_all` style. To that can be added:
+/// - `edge_latch` if the edge is pointing at a latch
+/// - `edge_complement` if the edge is complemented
+/// - `edge_output` if the edge is directed to a final output (an output for an AIG, the output of the final `OR`/`XOR` gate for a miter depending on its structure).
 pub struct GraphvizStyle {
     // Global
     rankdir: String,
@@ -180,6 +213,7 @@ fn get_xor_id(ia: NodeId, ca: bool, ib: NodeId, cb: bool) -> String {
 }
 
 impl Aig {
+    /// Returns a DOT representation of the AIG.
     pub fn to_dot(&self, graphviz_style: GraphvizStyle) -> String {
         let mut decl_edges = String::new();
 
@@ -264,6 +298,7 @@ strict digraph {{
 }
 
 impl Miter {
+    /// Returns a DOT representation of the miter.
     pub fn to_dot(&self, graphviz_style: GraphvizStyle) -> String {
         let mut decl_edges = String::new();
 
@@ -425,11 +460,61 @@ strict digraph {{
             decl_output,
             decl_inputs,
             decl_latches,
-            decl_ands_b, // Declare b first, this way, A is on the left and B on the right.
-            decl_ands_a, // Note that it probably works only way with ranking=BT. Todo: do better.
+            decl_ands_a,
+            decl_ands_b,
             decl_xors,
             decl_or_optional,
             decl_edges
         )
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::Path;
+
+    use super::*;
+
+    fn circuit_to_dot<P: AsRef<Path>>(path: P) {
+        let aig = Aig::from_file(path).unwrap();
+        println!("{}", aig.to_dot(GraphvizStyle::default()));
+    }
+
+    fn circuit_miter_to_dot<P: AsRef<Path>>(path: P) {
+        let aig = Aig::from_file(path).unwrap();
+
+        // Creating a miter between two copies of the circuit
+        let outputs_map = aig
+            .get_outputs()
+            .iter()
+            .map(|edge| {
+                let id = edge.get_node().borrow().get_id();
+                let b = edge.get_complement();
+                ((id, b), (id, b))
+            })
+            .collect();
+
+        let miter = Miter::new(&aig, &aig, outputs_map).unwrap();
+        println!("{}", miter.to_dot(GraphvizStyle::default()));
+    }
+
+    #[test]
+    fn half_adder_to_dot() {
+        circuit_to_dot("assets/circuits/half-adder.aag");
+    }
+
+    #[test]
+    fn half_adder_miter_to_dot() {
+        circuit_miter_to_dot("assets/circuits/half-adder.aag");
+    }
+
+    #[test]
+    fn ctrl_to_dot() {
+        circuit_to_dot("assets/circuits/ctrl.aig");
+    }
+
+    #[test]
+    fn ctrl_miter_to_dot() {
+        circuit_miter_to_dot("assets/circuits/ctrl.aig");
     }
 }
