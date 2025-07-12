@@ -67,11 +67,14 @@ impl From<TryFromIntError> for MiterError {
 /// [`try_prove_eq`]: Miter::try_prove_eq
 pub struct Miter {
     /// The reference miter.
-    a: Aig,
+    /// Public for crate because it is required for [`Miter::to_dot`], implemented in [`crate::dot`].
+    pub(super) a: Aig,
     /// The optimized miter.
-    b: Aig,
+    /// Public for crate because it is required for [`Miter::to_dot`], implemented in [`crate::dot`].
+    pub(super) b: Aig,
     /// Maps outputs of `a` to outputs of `b`.
-    outputs_map: HashMap<(NodeId, bool), (NodeId, bool)>,
+    /// Public for crate because it is required for [`Miter::to_dot`], implemented in [`crate::dot`].
+    pub(super) outputs_map: HashMap<(NodeId, bool), (NodeId, bool)>,
     /// Associating a SAT literal to each node.
     /// Nodes from `a` might also refer a literal originally associated with a node of `b`.
     litmap_a: HashMap<NodeId, Lit>,
