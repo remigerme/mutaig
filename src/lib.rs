@@ -157,7 +157,7 @@ impl AigEdge {
 /// An AIG node.
 ///
 /// Each node has an id. By convention, id for constant node `False` is 0. The id must be unique.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum AigNode {
     /// The constant low/false signal.
     False,
@@ -183,6 +183,44 @@ pub type AigNodeRef = Rc<RefCell<AigNode>>;
 
 /// A non-counting reference to an AIG node - used internally.
 type AigNodeWeak = Weak<RefCell<AigNode>>;
+
+impl PartialEq for AigNode {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (AigNode::False, AigNode::False) => true,
+            (AigNode::Input(id1), AigNode::Input(id2)) => id1 == id2,
+            (
+                AigNode::Latch {
+                    id: id1,
+                    next: next1,
+                    init: init1,
+                },
+                AigNode::Latch {
+                    id: id2,
+                    next: next2,
+                    init: init2,
+                },
+            ) => id1 == id2 && next1 == next2 && init1 == init2,
+            (
+                AigNode::And {
+                    id: id1,
+                    fanin0: fanin01,
+                    fanin1: fanin11,
+                    ..
+                },
+                AigNode::And {
+                    id: id2,
+                    fanin0: fanin02,
+                    fanin1: fanin12,
+                    ..
+                },
+            ) => id1 == id2 && fanin01 == fanin02 && fanin11 == fanin12,
+            (_, _) => false,
+        }
+    }
+}
+
+impl Eq for AigNode {}
 
 impl AigNode {
     pub fn and(id: NodeId, fanin0: AigEdge, fanin1: AigEdge) -> Self {
@@ -544,22 +582,22 @@ impl Aig {
     /// assert_eq!(i1, i1_);
     ///
     /// let and_gate =
-    ///     aig.add_node(AigNode::And {
-    ///         id: 2,
-    ///         fanin0: AigEdge::new(i1.clone(), false),
-    ///         fanin1: AigEdge::new(i1.clone(), true)
-    ///     }).unwrap(); // represent i1 ^ !i1 so will be false all the time (just an example)
+    ///     aig.add_node(AigNode::and(
+    ///         2,
+    ///         AigEdge::new(i1.clone(), false),
+    ///         AigEdge::new(i1.clone(), true)
+    ///     )).unwrap(); // represent i1 ^ !i1 so will be false all the time (just an example)
     ///
     /// // Some stuff we cannot do
     /// // Node with id 0
     /// assert!(aig.add_node(AigNode::Input(0)).is_err());
     /// // Id 1 is already taken by an input
     /// assert!(
-    ///     aig.add_node(AigNode::And {
-    ///         id: 1,
-    ///         fanin0: AigEdge::new(i1.clone(), false),
-    ///         fanin1: AigEdge::new(i1.clone(), false)
-    ///     })
+    ///     aig.add_node(AigNode::and(
+    ///         1,
+    ///         AigEdge::new(i1.clone(), false),
+    ///         AigEdge::new(i1.clone(), false)
+    ///     ))
     ///     .is_err()
     /// );
     /// ```
