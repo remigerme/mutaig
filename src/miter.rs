@@ -558,18 +558,18 @@ mod test {
 
         let a2 = a.add_node(AigNode::Input(2)).unwrap();
         b.add_node(AigNode::Input(1)).unwrap(); // not using b1
-        a.add_node(AigNode::And {
-            id: 3,
-            fanin0: AigEdge::new(a1.clone(), false),
-            fanin1: AigEdge::new(a2.clone(), false),
-        })
+        a.add_node(AigNode::and(
+            3,
+            AigEdge::new(a1.clone(), false),
+            AigEdge::new(a2.clone(), false),
+        ))
         .unwrap();
         let b0 = b.add_node(AigNode::False).unwrap();
-        b.add_node(AigNode::And {
-            id: 3,
-            fanin0: AigEdge::new(b0.clone(), false),
-            fanin1: AigEdge::new(b2.clone(), false),
-        })
+        b.add_node(AigNode::and(
+            3,
+            AigEdge::new(b0.clone(), false),
+            AigEdge::new(b2.clone(), false),
+        ))
         .unwrap();
         a.add_output(3, true).unwrap();
         let mut outputs = HashMap::new();
@@ -597,11 +597,11 @@ mod test {
         let a1 = a.add_node(AigNode::Input(1)).unwrap();
         let a2 = a.add_node(AigNode::Input(2)).unwrap();
         let a3 = a
-            .add_node(AigNode::And {
-                id: 3,
-                fanin0: AigEdge::new(a1.clone(), false),
-                fanin1: AigEdge::new(a2.clone(), false),
-            })
+            .add_node(AigNode::and(
+                3,
+                AigEdge::new(a1.clone(), false),
+                AigEdge::new(a2.clone(), false),
+            ))
             .unwrap();
         let _a4 = a.add_node(AigNode::Latch {
             id: 4,
@@ -614,11 +614,11 @@ mod test {
         let b1 = b.add_node(AigNode::Input(1)).unwrap();
         let b2 = b.add_node(AigNode::Input(2)).unwrap();
         let b3 = b
-            .add_node(AigNode::And {
-                id: 3,
-                fanin0: AigEdge::new(b2.clone(), false),
-                fanin1: AigEdge::new(b1.clone(), false),
-            })
+            .add_node(AigNode::and(
+                3,
+                AigEdge::new(b2.clone(), false),
+                AigEdge::new(b1.clone(), false),
+            ))
             .unwrap();
         let _b4 = b.add_node(AigNode::Latch {
             id: 4,

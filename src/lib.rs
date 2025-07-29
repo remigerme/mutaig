@@ -185,6 +185,15 @@ pub type AigNodeRef = Rc<RefCell<AigNode>>;
 type AigNodeWeak = Weak<RefCell<AigNode>>;
 
 impl AigNode {
+    pub fn and(id: NodeId, fanin0: AigEdge, fanin1: AigEdge) -> Self {
+        AigNode::And {
+            id,
+            fanin0,
+            fanin1,
+            fanouts: Vec::new(),
+        }
+    }
+
     pub fn is_false(&self) -> bool {
         matches!(self, AigNode::False)
     }
@@ -583,7 +592,7 @@ impl Aig {
 
     /// Create a new and node (or retrieve it if the exact same node already exists).
     pub fn new_and(&mut self, id: NodeId, fanin0: AigEdge, fanin1: AigEdge) -> Result<AigNodeRef> {
-        let candidate = AigNode::And { id, fanin0, fanin1 };
+        let candidate = AigNode::and(id, fanin0, fanin1);
         self.add_node(candidate)
     }
 
@@ -912,22 +921,22 @@ mod test {
         let i1 = AigNode::Input(1);
         let ri1 = aig.add_node(i1.clone()).unwrap();
         assert_eq!(*ri1.borrow(), i1);
-        let a2 = AigNode::And {
-            id: 2,
-            fanin0: AigEdge::new(rnf.clone(), false),
-            fanin1: AigEdge::new(ri1.clone(), false),
-        };
+        let a2 = AigNode::and(
+            2,
+            AigEdge::new(rnf.clone(), false),
+            AigEdge::new(ri1.clone(), false),
+        );
         let ra2 = aig.add_node(a2.clone()).unwrap();
         assert_eq!(*ra2.borrow(), a2);
 
         // Now, trying to add some illegal nodes
         assert!(aig.add_node(AigNode::Input(2)).is_err());
         assert!(
-            aig.add_node(AigNode::And {
-                id: 1,
-                fanin0: AigEdge::new(rnf.clone(), false),
-                fanin1: AigEdge::new(rnf.clone(), false)
-            })
+            aig.add_node(AigNode::and(
+                1,
+                AigEdge::new(rnf.clone(), false),
+                AigEdge::new(rnf.clone(), false)
+            ))
             .is_err()
         );
 
@@ -944,11 +953,11 @@ mod test {
         assert!(a.add_node(AigNode::Input(0)).is_err());
         let i1 = a.add_node(AigNode::Input(1)).unwrap();
         assert!(
-            a.add_node(AigNode::And {
-                id: 0,
-                fanin0: AigEdge::new(i1.clone(), false),
-                fanin1: AigEdge::new(i1.clone(), false)
-            })
+            a.add_node(AigNode::and(
+                0,
+                AigEdge::new(i1.clone(), false),
+                AigEdge::new(i1.clone(), false)
+            ))
             .is_err()
         );
         assert!(
@@ -968,11 +977,11 @@ mod test {
 
         let fake_input = Rc::new(RefCell::new(AigNode::Input(1)));
         assert!(
-            a.add_node(AigNode::And {
-                id: 1,
-                fanin0: AigEdge::new(fake_input.clone(), false),
-                fanin1: AigEdge::new(fake_input.clone(), false),
-            })
+            a.add_node(AigNode::and(
+                1,
+                AigEdge::new(fake_input.clone(), false),
+                AigEdge::new(fake_input.clone(), false),
+            ))
             .is_err()
         );
 
@@ -1047,11 +1056,11 @@ mod test {
             *aig.add_node(AigNode::Input(1)).unwrap().borrow(),
             AigNode::Input(1)
         );
-        let a2 = AigNode::And {
-            id: 2,
-            fanin0: AigEdge::new(aig.get_node(0).unwrap(), false),
-            fanin1: AigEdge::new(aig.get_node(1).unwrap(), false),
-        };
+        let a2 = AigNode::and(
+            2,
+            AigEdge::new(aig.get_node(0).unwrap(), false),
+            AigEdge::new(aig.get_node(1).unwrap(), false),
+        );
         assert_eq!(*aig.add_node(a2.clone()).unwrap().borrow(), a2);
         assert_eq!(*aig.get_node(0).unwrap().borrow(), AigNode::False);
         assert_eq!(*aig.get_node(1).unwrap().borrow(), AigNode::Input(1));
@@ -1080,17 +1089,17 @@ mod test {
         aig.add_node(AigNode::Input(1)).unwrap();
         aig.add_node(AigNode::Input(2)).unwrap();
         aig.add_node(AigNode::Input(3)).unwrap();
-        aig.add_node(AigNode::And {
-            id: 4,
-            fanin0: AigEdge::new(aig.get_node(1).unwrap(), false),
-            fanin1: AigEdge::new(aig.get_node(2).unwrap(), false),
-        })
+        aig.add_node(AigNode::and(
+            4,
+            AigEdge::new(aig.get_node(1).unwrap(), false),
+            AigEdge::new(aig.get_node(2).unwrap(), false),
+        ))
         .unwrap();
-        aig.add_node(AigNode::And {
-            id: 5,
-            fanin0: AigEdge::new(aig.get_node(2).unwrap(), false),
-            fanin1: AigEdge::new(aig.get_node(3).unwrap(), false),
-        })
+        aig.add_node(AigNode::and(
+            5,
+            AigEdge::new(aig.get_node(2).unwrap(), false),
+            AigEdge::new(aig.get_node(3).unwrap(), false),
+        ))
         .unwrap();
         aig.add_output(5, false).unwrap();
         aig.update();
@@ -1107,11 +1116,11 @@ mod test {
         let a1 = a.add_node(AigNode::Input(1)).unwrap();
         let a2 = a.add_node(AigNode::Input(2)).unwrap();
         let a3 = a
-            .add_node(AigNode::And {
-                id: 3,
-                fanin0: AigEdge::new(a1.clone(), false),
-                fanin1: AigEdge::new(a2.clone(), false),
-            })
+            .add_node(AigNode::and(
+                3,
+                AigEdge::new(a1.clone(), false),
+                AigEdge::new(a2.clone(), false),
+            ))
             .unwrap();
         let _a4 = a.add_node(AigNode::Latch {
             id: 4,
@@ -1119,11 +1128,11 @@ mod test {
             init: None,
         });
         // Do not save the node - or drop it explicitly later
-        a.add_node(AigNode::And {
-            id: 5,
-            fanin0: AigEdge::new(a1.clone(), true),
-            fanin1: AigEdge::new(a2.clone(), true),
-        })
+        a.add_node(AigNode::and(
+            5,
+            AigEdge::new(a1.clone(), true),
+            AigEdge::new(a2.clone(), true),
+        ))
         .unwrap();
         a.add_output(4, false).unwrap();
 
@@ -1131,11 +1140,11 @@ mod test {
         let b1 = b.add_node(AigNode::Input(1)).unwrap();
         let b2 = b.add_node(AigNode::Input(2)).unwrap();
         let b3 = b
-            .add_node(AigNode::And {
-                id: 3,
-                fanin0: AigEdge::new(b1.clone(), false),
-                fanin1: AigEdge::new(b2.clone(), false),
-            })
+            .add_node(AigNode::and(
+                3,
+                AigEdge::new(b1.clone(), false),
+                AigEdge::new(b2.clone(), false),
+            ))
             .unwrap();
         let _b4 = b.add_node(AigNode::Latch {
             id: 4,
@@ -1166,18 +1175,18 @@ mod test {
         assert_eq!(a, b);
 
         let _a3 = a
-            .add_node(AigNode::And {
-                id: 3,
-                fanin0: AigEdge::new(a1.clone(), false),
-                fanin1: AigEdge::new(a2.clone(), false),
-            })
+            .add_node(AigNode::and(
+                3,
+                AigEdge::new(a1.clone(), false),
+                AigEdge::new(a2.clone(), false),
+            ))
             .unwrap();
         let _b3 = b
-            .add_node(AigNode::And {
-                id: 3,
-                fanin0: AigEdge::new(b2.clone(), false),
-                fanin1: AigEdge::new(b1.clone(), false),
-            })
+            .add_node(AigNode::and(
+                3,
+                AigEdge::new(b2.clone(), false),
+                AigEdge::new(b1.clone(), false),
+            ))
             .unwrap();
 
         assert_ne!(a, b);

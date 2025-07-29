@@ -141,11 +141,11 @@ mod test {
         let n0 = aig.add_node(AigNode::False).unwrap();
         let n1 = aig.add_node(AigNode::Input(1)).unwrap();
         let n2 = aig
-            .add_node(AigNode::And {
-                id: 2,
-                fanin0: AigEdge::new(n0.clone(), false),
-                fanin1: AigEdge::new(n1.clone(), false),
-            })
+            .add_node(AigNode::and(
+                2,
+                AigEdge::new(n0.clone(), false),
+                AigEdge::new(n1.clone(), false),
+            ))
             .unwrap();
 
         // Now using the DFS
@@ -172,19 +172,19 @@ mod test {
         let n0 = aig.add_node(AigNode::False).unwrap();
         let n1 = aig.add_node(AigNode::Input(1)).unwrap();
         let n2 = aig
-            .add_node(AigNode::And {
-                id: 2,
-                fanin0: AigEdge::new(n0.clone(), false),
-                fanin1: AigEdge::new(n1.clone(), false),
-            })
+            .add_node(AigNode::and(
+                2,
+                AigEdge::new(n0.clone(), false),
+                AigEdge::new(n1.clone(), false),
+            ))
             .unwrap();
         let n3 = aig.add_node(AigNode::Input(3)).unwrap();
         let n4 = aig
-            .add_node(AigNode::And {
-                id: 4,
-                fanin0: AigEdge::new(n2.clone(), false),
-                fanin1: AigEdge::new(n3.clone(), false),
-            })
+            .add_node(AigNode::and(
+                4,
+                AigEdge::new(n2.clone(), false),
+                AigEdge::new(n3.clone(), false),
+            ))
             .unwrap();
         aig.add_output(2, false).unwrap();
         aig.add_output(4, true).unwrap();
@@ -257,11 +257,11 @@ mod test {
         let n0 = aig.add_node(AigNode::Input(1)).unwrap();
         let n1 = aig.add_node(AigNode::Input(1)).unwrap();
         let n2 = aig
-            .add_node(AigNode::And {
-                id: 2,
-                fanin0: AigEdge::new(n0.clone(), false),
-                fanin1: AigEdge::new(n1.clone(), true),
-            })
+            .add_node(AigNode::and(
+                2,
+                AigEdge::new(n0.clone(), false),
+                AigEdge::new(n1.clone(), true),
+            ))
             .unwrap();
         let mut dfs = Dfs::from_node(n2.clone());
         assert_eq!(dfs.next(&aig).unwrap(), n2.clone());

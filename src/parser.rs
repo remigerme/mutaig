@@ -263,11 +263,11 @@ mod ascii {
         // Adding and gates
         // First step: add and nodes with dummy edges to node false
         for &(id, _, _, _, _) in &ands {
-            aig.add_node(AigNode::And {
-                id: id,
-                fanin0: AigEdge::new(node_false.clone(), false),
-                fanin1: AigEdge::new(node_false.clone(), false),
-            })?;
+            aig.add_node(AigNode::and(
+                id,
+                AigEdge::new(node_false.clone(), false),
+                AigEdge::new(node_false.clone(), false),
+            ))?;
         }
         // Then replace with real edges
         for &(id, fanin0_id, fanin0_complement, fanin1_id, fanin1_complement) in &ands {
@@ -566,19 +566,19 @@ mod bin {
             let rhs0 = lhs - delta0;
             let rhs1 = rhs0 - delta1;
 
-            aig.add_node(AigNode::And {
-                id: lhs >> 1,
-                fanin0: AigEdge::new(
+            aig.add_node(AigNode::and(
+                lhs >> 1,
+                AigEdge::new(
                     aig.get_node(rhs0 >> 1)
                         .ok_or(AigError::NodeDoesNotExist(rhs0 >> 1))?,
                     rhs0 & 1 != 0,
                 ),
-                fanin1: AigEdge::new(
+                AigEdge::new(
                     aig.get_node(rhs1 >> 1)
                         .ok_or(AigError::NodeDoesNotExist(rhs1 >> 1))?,
                     rhs1 & 1 != 0,
                 ),
-            })?;
+            ))?;
 
             lhs += 2;
         }
