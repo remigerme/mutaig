@@ -443,8 +443,6 @@ impl Miter {
             )));
         }
 
-        eprintln!("{:?}", self.litmap_b);
-
         let lit_b = *self
             .litmap_b
             .get(&node_b)
