@@ -40,7 +40,7 @@ const DEFAULT_LATCH_NODE_FORMAT: &str = "[shape=diamond]";
 const DEFAULT_AND_NODE_FORMAT: &str = "[shape=circle]";
 const DEFAULT_XOR_NODE_FORMAT: &str = "[shape=circle, label=\"⊕\"]";
 const DEFAULT_OR_NODE_FORMAT: &str = "[shape=circle, label=\"∪\"]";
-/// See https://stackoverflow.com/questions/50822798/how-to-use-graphviz-to-draw-a-node-pointed-by-an-arrow.
+/// See <https://stackoverflow.com/questions/50822798/how-to-use-graphviz-to-draw-a-node-pointed-by-an-arrow>.
 const DEFAULT_OUTPUT_NODE_FORMAT: &str = "[shape=none, height=.0, width=.0]";
 
 // Defining default style for edges.
