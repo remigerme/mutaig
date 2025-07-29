@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use crate::{Aig, AigNodeRef, NodeId};
 
-/// A simple DFS visitor.
+/// A simple DFS visitor. Fanins of latches are explored as traditional fanins.
 ///
 /// Nodes are yielded in preorder. You can:
 /// - start a DFS from a node using [`from_node`]

@@ -282,7 +282,10 @@ mod ascii {
 
         // And finally marking outputs
         for &(id, compl) in &outputs {
-            aig.add_output(id, compl)?;
+            // We don't want to mark constant node or inputs as output.
+            if id >= 1 + inputs.len() as u64 {
+                aig.add_output(id, compl)?;
+            }
         }
 
         // Let's clean the useless stuff
@@ -617,7 +620,11 @@ mod bin {
 
             // And finally marking outputs
             for &(id, compl) in &outputs {
-                aig.add_output(id, compl)?;
+                // We don't want to mark the constant node or an input as an output
+                // this is obviously true as these won't be modified anyway
+                if id >= 1 + header.i {
+                    aig.add_output(id, compl)?;
+                }
             }
 
             // Let's clean the useless stuff

@@ -57,21 +57,29 @@ impl From<TryFromIntError> for MiterError {
 /// [Verification of large synthesized designs](https://doi.org/10.1109/ICCAD.1993.580110) by D. Brand.
 ///
 /// To use this struct:
-/// - create a new miter with [`new`]
-/// - (optional) merge internal nodes that you know are equivalent using [`try_prove_eq_node`]
-///   (it will incrementally simplify the search space of the generated SAT queries)
-/// - then prove the two original AIGs are equivalent using [`try_prove_eq`].
+/// - create a new miter with [`Miter::new`]
+/// - (optional) merge internal nodes: verify they are equivalent using [`extract_cnf_node`],
+///   and use [`merge`] if the extracted formula was UNSAT (it will incrementally simplify
+///   the search space of the generated SAT queries). In case of an obvious merging,
+///   you can also use [`mergeable`] to determine wether two nodes can be obviously merged.
+/// - then prove the two original AIGs are equivalent using [`extract_cnf`]:
+///   if the extracted formula is UNSAT, AIGs are equivalent. Else if it is SAT, then
+///   you have determined an input vector on which the AIGs differ.
 ///
-/// [`new`]: Miter::new
-/// [`try_prove_eq_node`]: Miter::try_prove_eq_node
-/// [`try_prove_eq`]: Miter::try_prove_eq
+/// [`extract_cnf_node`]: Miter::extract_cnf_node
+/// [`merge`]: Miter::merge
+/// [`mergeable`]: Miter::mergeable
+/// [`extract_cnf`]: Miter::extract_cnf
 pub struct Miter {
     /// The reference miter.
-    a: Aig,
+    /// Public for crate because it is required for [`Miter::to_dot`], implemented in [`crate::dot`].
+    pub(super) a: Aig,
     /// The optimized miter.
-    b: Aig,
+    /// Public for crate because it is required for [`Miter::to_dot`], implemented in [`crate::dot`].
+    pub(super) b: Aig,
     /// Maps outputs of `a` to outputs of `b`.
-    outputs_map: HashMap<(NodeId, bool), (NodeId, bool)>,
+    /// Public for crate because it is required for [`Miter::to_dot`], implemented in [`crate::dot`].
+    pub(super) outputs_map: HashMap<(NodeId, bool), (NodeId, bool)>,
     /// Associating a SAT literal to each node.
     /// Nodes from `a` might also refer a literal originally associated with a node of `b`.
     litmap_a: HashMap<NodeId, Lit>,
@@ -277,8 +285,6 @@ impl Miter {
         }
 
         Ok(())
-
-        // Adding the
     }
 
     /// Generates one modular SAT query to try to prove two internal signals of the AIGs are equivalent.
@@ -456,8 +462,10 @@ impl Miter {
     /// Behavior is as follows:
     /// - if the two nodes are false, they can be merged
     /// - if the two nodes are the same input, they can be merged
-    /// - if the two nodes are latches with the same id and equivalent next state, they can be merged.
-    ///   Note that we don't care about their init values.
+    /// - if the two nodes are latches with the same id they can be merged.
+    ///   Note that we don't care about their init values nor their next state.
+    ///   Indeed, here merging them allow us to consider as pseudo inputs.
+    ///   Their next state will be added as pseudo outputs to be checked when calling [`Miter::extract_cnf`].
     /// - if the two nodes are and gates, we check if they have the same output function,
     ///   regardless of their fanins order for example. We also deal with complemented equivalence.
     ///   For example, a = b ^ c and a' = c' ^ not(b') are equivalent if b is equivalent to not(b')
@@ -508,17 +516,11 @@ impl Miter {
                     || (self.merged.contains(&(id0a, id1b, c0a ^ c1b))
                         && self.merged.contains(&(id1a, id0b, c1a ^ c0b))))
             }
-            // Ignoring init values for latches
-            // Latches must be equal (without complement)
-            (AigNode::Latch { next: next_a, .. }, AigNode::Latch { next: next_b, .. }) => {
-                Ok(node_a == node_b
-                    && self.merged.contains(&(
-                        next_a.get_node().borrow().get_id(),
-                        next_b.get_node().borrow().get_id(),
-                        false,
-                    )))
+            // Ignoring init values for latches and next state, they are pseudo inputs.
+            (AigNode::Latch { id: id_a, .. }, AigNode::Latch { id: id_b, .. }) => {
+                Ok(*id_a == *id_b)
             }
-            (AigNode::Input(..), AigNode::Input(..)) => Ok(node_a == node_b),
+            (AigNode::Input(id_a), AigNode::Input(id_b)) => Ok(*id_a == *id_b),
             (AigNode::False, AigNode::False) => Ok(true),
             // Some others merge could be considered, but let's not consider them for now.
             // Example: constant signal propagation
@@ -527,6 +529,9 @@ impl Miter {
     }
 
     /// Returns true iff all outputs have been merged ie circuits are equivalent.
+    ///
+    /// **WARNING**  
+    /// For now, consider only real outputs and not pseudo outputs induced by latches. TODO?
     pub fn are_outputs_merged(&self) -> bool {
         for out in self.a.get_outputs() {
             if !self.merged_a.contains(&out.get_node().borrow().get_id()) {
@@ -617,8 +622,8 @@ mod test {
             .unwrap();
         let _b4 = b.add_node(AigNode::Latch {
             id: 4,
-            next: AigEdge::new(b3.clone(), true),
-            init: Some(true), // init value does not matter
+            next: AigEdge::new(b3.clone(), false), // next do not matter
+            init: Some(true),                      // init value does not matter
         });
         b.add_output(4, false).unwrap();
 
@@ -629,7 +634,7 @@ mod test {
         assert!(!miter.mergeable(2, 1).unwrap());
         assert!(!miter.mergeable(1, 2).unwrap());
         assert!(!miter.mergeable(3, 3).unwrap()); // We haven't proven equivalence of inputs yet
-        assert!(!miter.mergeable(4, 4).unwrap());
+        assert!(miter.mergeable(4, 4).unwrap());
 
         assert!(miter.mergeable(1, 1).unwrap());
         assert!(miter.mergeable(2, 2).unwrap());

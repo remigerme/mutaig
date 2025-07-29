@@ -2,15 +2,19 @@
 //! DO WE REALLY NEED TO REPLACE ONE NODE BY NEGATION-EQUIVALENT NODE?
 //! APPARENTLY IN PRACTICE NO.
 //! IF YES, THIS IS A DRAFT IMPLEMENTATION.
+//!
+//! Guess what, obviously we need it.
 
 pub mod cnf;
 pub mod dfs;
+pub mod dot;
 pub mod miter;
 mod parser;
 
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    mem::swap,
     ops::Not,
     rc::{Rc, Weak},
 };
@@ -291,6 +295,20 @@ impl AigNode {
     fn update(&mut self) {
         match self {
             AigNode::And { fanouts, .. } => fanouts.retain(|weak| weak.upgrade().is_some()),
+            _ => (),
+        }
+    }
+
+    /// Reorders fanins to make sure fanin0_id >= fanin1_id for AND gates.
+    fn reorder_fanins(&mut self) {
+        match self {
+            AigNode::And { fanin0, fanin1, .. } => {
+                let id0 = fanin0.get_node().borrow().get_id();
+                let id1 = fanin1.get_node().borrow().get_id();
+                if id0 < id1 {
+                    swap(fanin0, fanin1);
+                }
+            }
             _ => (),
         }
     }
@@ -639,18 +657,24 @@ impl Aig {
             )))?;
 
         assert!(old.borrow().is_and());
-        assert!(new.borrow().is_and());
 
-        let fanins = new.borrow().get_fanins();
+        if new.borrow().is_and() {
+            let fanins = new.borrow().get_fanins();
 
-        old.borrow_mut().set_fanin(&fanins[0], FaninId::Fanin0)?;
-        old.borrow_mut().set_fanin(&fanins[1], FaninId::Fanin1)?;
-        old.borrow_mut().set_id(id)?;
+            old.borrow_mut().set_fanin(&fanins[0], FaninId::Fanin0)?;
+            old.borrow_mut().set_fanin(&fanins[1], FaninId::Fanin1)?;
+            old.borrow_mut().set_id(id)?;
+        } else if new.borrow().is_false() || new.borrow().is_input() {
+            old.borrow_mut().set_id(id)?;
+        } else {
+            panic!("replacing latch: unsupported features for now");
+        }
 
         // Keeping the map updated
         self.nodes.insert(id, Rc::downgrade(&old));
 
         // If complement (ie the new node is the negation of the old one), we need to update its fanout
+        // (potentially including outputs)
         if complement {
             let fanouts: Vec<AigNodeRef> = old
                 .borrow()
@@ -667,10 +691,46 @@ impl Aig {
         Ok(())
     }
 
+    fn minimize_ids_visit(
+        &self,
+        node: AigNodeRef,
+        new_nodes: &mut Vec<AigNodeRef>,
+        seen: &mut HashSet<NodeId>,
+    ) -> Result<()> {
+        let mut stack: Vec<AigNodeRef> = Vec::new();
+        stack.push(node);
+
+        while let Some(node) = stack.pop() {
+            let id = node.borrow().get_id();
+
+            if seen.contains(&id) {
+                return Ok(());
+            }
+            seen.insert(id);
+
+            let mut fanins = node.borrow().get_fanins();
+            fanins.sort_unstable_by_key(|fanin| fanin.get_node().borrow().get_id());
+
+            for fanin in fanins {
+                if !seen.contains(&fanin.get_node().borrow().get_id()) {
+                    stack.push(fanin.get_node());
+                }
+            }
+
+            if node.borrow().is_and() {
+                new_nodes.push(node);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Minimize ids of gates (as they would be stored in AIGER format):
     /// - check false node exists
     /// - check inputs and latches are in order
     /// - minimize ids of AND gates to match their id in AIGER format
+    ///
+    /// Internally relying on a DFS on lower CertifId to ensure reproducibility (see ABC).
     pub fn minimize_ids(&mut self) -> Result<()> {
         self.update();
 
@@ -696,21 +756,48 @@ impl Aig {
         }
 
         // We need to renumber the AND gates.
-        // Let's prepare the nodes in the right order.
-        let mut node_ids: Vec<NodeId> = self.nodes.keys().copied().collect();
-        node_ids.sort();
+        // Performing the DFS on lower ids first.
+        let mut new_nodes = Vec::new();
+        let mut seen = HashSet::new();
+        let mut outputs_to_visit = self
+            .outputs
+            .iter()
+            .map(|output| output.get_node())
+            .collect::<Vec<AigNodeRef>>();
+        outputs_to_visit.sort_unstable_by_key(|node| node.borrow().get_id());
 
-        for idx in 1 + i + l..node_ids.len() as u64 {
-            let old_idx = node_ids[idx as usize];
-
-            // Updating node idx and aig map
-            // Using unwrap because we previously updated the AIG structure
-            let node = self.nodes.remove(&old_idx).unwrap().upgrade().unwrap();
-            node.borrow_mut().set_id(idx)?;
-            self.nodes.insert(idx, Rc::downgrade(&node));
+        while let Some(node) = outputs_to_visit.pop() {
+            self.minimize_ids_visit(node, &mut new_nodes, &mut seen)?;
         }
+        new_nodes.reverse();
+
+        // Updating ids and map
+        // Also making sure fanins are correctly ordered (fanin0 >= fanin1)
+        let mut new_nodes_map = self.nodes.clone();
+        new_nodes_map.retain(|id, _| *id < 1 + i + l); // keeping only inputs and latches
+        let mut idx = 1 + i + l;
+        for node in new_nodes {
+            new_nodes_map.insert(idx, Rc::downgrade(&node));
+            node.borrow_mut().set_id(idx)?;
+            node.borrow_mut().reorder_fanins();
+
+            idx += 1;
+        }
+        self.nodes = new_nodes_map;
 
         self.check_integrity()
+    }
+
+    /// Tests if the current AIG nodes are in a valid AIGER format:
+    /// - constant with id $0$
+    /// - then inputs with ids $1, ..., i$
+    /// - then latches with ids $i + 1, ..., i + l + 1$
+    /// - then and gates with ids $i + l + 1, ..., i + l + a + 1$ such as for all gate z = and(a, b),
+    ///   $id(z) \gt id(a) \geq id(b)$
+    /// You can use [`Aig::minimize_ids`] to mutate the current AIG into an AIGER-compliant AIG.
+    pub fn is_valid_aiger() -> bool {
+        // todo
+        return true;
     }
 
     /// Checking if the AIG structure is correct.
@@ -1186,8 +1273,8 @@ mod test {
         let b4 = b
             .add_node(AigNode::And {
                 id: 4,
-                fanin0: AigEdge::new(b1.clone(), false),
-                fanin1: AigEdge::new(b3.clone(), false),
+                fanin0: AigEdge::new(b3.clone(), false),
+                fanin1: AigEdge::new(b1.clone(), false),
             })
             .unwrap();
         let _b5 = b

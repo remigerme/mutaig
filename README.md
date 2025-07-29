@@ -185,6 +185,41 @@ You should look at three very helpful functions:
 - `extract_cnf_node`: to extract a miter+CNF between two internal nodes
 - `merge`: to merge two nodes that you have proven equivalent (using `mergeable` or `extract_cnf_node`)
 
+### Export to Graphviz (DOT)
+
+You can also export AIGs and miters to the Graphviz dot format using their `to_dot` methods.
+
+```rust
+use mutaig::Aig;
+use mutaig::miter::Miter;
+use mutaig::dot::GraphvizStyle;
+
+let aig = Aig::from_file("assets/circuits/half-adder.aag").unwrap();
+println!("{}", aig.to_dot(GraphvizStyle::default()));
+
+// Creating a miter between two copies of the circuit
+let outputs_map = aig
+    .get_outputs()
+    .iter()
+    .map(|edge| {
+        let id = edge.get_node().borrow().get_id();
+        let b = edge.get_complement();
+        ((id, b), (id, b))
+    })
+    .collect();
+
+let miter = Miter::new(&aig, &aig, outputs_map).unwrap();
+println!("{}", miter.to_dot(GraphvizStyle::default()));
+```
+
+You can then render the graphs using the DOT engine.
+
+The graphs produced by the code above, first the half-adder, then the half-adder mitered with itself:
+
+![The half-adder.](assets/images/half-adder.svg)
+
+![The half-adder mitered with itself.](assets/images/half-adder-miter.svg)
+
 ## Docs
 
 The docs for the latest release of MUTAIG are available on [docs.rs](https://docs.rs/mutaig/latest/mutaig/).
