@@ -499,7 +499,9 @@ impl Aig {
                     Ok(())
                 }
             }
-            AigNode::And { id, fanin0, fanin1 } => {
+            AigNode::And {
+                id, fanin0, fanin1, ..
+            } => {
                 if id == 0 {
                     Err(AigError::IdZeroButNotFalse)
                 } else {
@@ -862,9 +864,24 @@ impl Aig {
                 }
                 self.check_edge_integrity(next)?;
             }
-            AigNode::And { id, fanin0, fanin1 } => {
+            AigNode::And {
+                id,
+                fanin0,
+                fanin1,
+                fanouts,
+            } => {
                 if *id == 0 {
                     return Err(AigError::IdZeroButNotFalse);
+                }
+                for fanout_weak in fanouts {
+                    if let Some(fanout) = fanout_weak.upgrade() {
+                        if !self.nodes.contains_key(&fanout.borrow().get_id()) {
+                            return Err(AigError::InvalidState(format!(
+                                "fanout {} is no longer in the AIG",
+                                fanout.borrow().get_id()
+                            )));
+                        }
+                    }
                 }
                 self.check_edge_integrity(fanin0)?;
                 self.check_edge_integrity(fanin1)?;
@@ -1217,18 +1234,18 @@ mod test {
         assert!(i1.borrow_mut().set_id(2).is_err()); // not allowed to rewrite input
         let i2 = aig.add_node(AigNode::Input(2)).unwrap();
         let a3 = aig
-            .add_node(AigNode::And {
-                id: 3,
-                fanin0: AigEdge::new(i1.clone(), false),
-                fanin1: AigEdge::new(i2.clone(), false),
-            })
+            .add_node(AigNode::and(
+                3,
+                AigEdge::new(i1.clone(), false),
+                AigEdge::new(i2.clone(), false),
+            ))
             .unwrap();
         let a4 = aig
-            .add_node(AigNode::And {
-                id: 4,
-                fanin0: AigEdge::new(a3.clone(), false),
-                fanin1: AigEdge::new(i2.clone(), false),
-            })
+            .add_node(AigNode::and(
+                4,
+                AigEdge::new(a3.clone(), false),
+                AigEdge::new(i2.clone(), false),
+            ))
             .unwrap();
 
         let a4_ = a4.clone();
@@ -1253,18 +1270,18 @@ mod test {
             })
             .unwrap();
         let a8 = a
-            .add_node(AigNode::And {
-                id: 8,
-                fanin0: AigEdge::new(i1.clone(), false),
-                fanin1: AigEdge::new(l3.clone(), false),
-            })
+            .add_node(AigNode::and(
+                8,
+                AigEdge::new(i1.clone(), false),
+                AigEdge::new(l3.clone(), false),
+            ))
             .unwrap();
         let _a15 = a
-            .add_node(AigNode::And {
-                id: 15,
-                fanin0: AigEdge::new(a8.clone(), false),
-                fanin1: AigEdge::new(i1.clone(), true),
-            })
+            .add_node(AigNode::and(
+                15,
+                AigEdge::new(a8.clone(), false),
+                AigEdge::new(i1.clone(), true),
+            ))
             .unwrap();
         a.add_output(15, false).unwrap();
         a.minimize_ids().unwrap();
@@ -1280,18 +1297,18 @@ mod test {
             })
             .unwrap();
         let b4 = b
-            .add_node(AigNode::And {
-                id: 4,
-                fanin0: AigEdge::new(b3.clone(), false),
-                fanin1: AigEdge::new(b1.clone(), false),
-            })
+            .add_node(AigNode::and(
+                4,
+                AigEdge::new(b3.clone(), false),
+                AigEdge::new(b1.clone(), false),
+            ))
             .unwrap();
         let _b5 = b
-            .add_node(AigNode::And {
-                id: 5,
-                fanin0: AigEdge::new(b4.clone(), false),
-                fanin1: AigEdge::new(b1.clone(), true),
-            })
+            .add_node(AigNode::and(
+                5,
+                AigEdge::new(b4.clone(), false),
+                AigEdge::new(b1.clone(), true),
+            ))
             .unwrap();
         b.add_output(5, false).unwrap();
 

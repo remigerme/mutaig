@@ -157,7 +157,9 @@ impl Cnf {
         litmap: &HashMap<NodeId, Lit>,
     ) -> Result<()> {
         match node {
-            AigNode::And { id, fanin0, fanin1 } => {
+            AigNode::And {
+                id, fanin0, fanin1, ..
+            } => {
                 let a = fanin0.get_literal_res(litmap)?;
                 let b = fanin1.get_literal_res(litmap)?;
                 let z = LitRes::from(*litmap.get(id).ok_or(MiterError::UnmappedNodeToLit(*id))?);
