@@ -111,6 +111,7 @@ pub struct GraphvizStyle {
     // Global
     rankdir: String,
     miter_output_label: String,
+    debug: bool,
 
     // Nodes
     cst_false: GraphvizNodeStyle,
@@ -133,6 +134,7 @@ impl Default for GraphvizStyle {
         GraphvizStyle {
             rankdir: DEFAULT_RANKDIR.to_string(),
             miter_output_label: DEFAULT_MITER_OUTPUT_LABEL.to_string(),
+            debug: false,
 
             cst_false: GraphvizNodeStyle(DEFAULT_FALSE_NODE_FORMAT.to_string()),
             input: GraphvizNodeStyle(DEFAULT_INPUT_NODE_FORMAT.to_string()),
@@ -150,6 +152,14 @@ impl Default for GraphvizStyle {
     }
 }
 
+impl GraphvizStyle {
+    pub fn debug() -> Self {
+        let mut style = GraphvizStyle::default();
+        style.debug = true;
+        style
+    }
+}
+
 impl AigNode {
     /// `id_prefix` is used only for latches and and gates (useful when mitering).
     fn get_graphviz_id(&self, id_prefix: Option<String>) -> String {
@@ -163,14 +173,20 @@ impl AigNode {
     }
 
     /// Beware, [`AigNode::False`] is a special case.
-    fn graphviz_decl(&self, id_prefix: Option<String>) -> String {
+    fn graphviz_decl(&self, id_prefix: Option<String>, debug: bool) -> String {
         let graphviz_id = self.get_graphviz_id(id_prefix);
 
         let label = match self {
             AigNode::False => return graphviz_id, // early return, we don't '\n' because style is defined later
             AigNode::Input(id) => format!("i{}", id),
             AigNode::Latch { .. } => format!("l{}", graphviz_id),
-            AigNode::And { .. } => "".to_string(),
+            AigNode::And { .. } => {
+                if debug {
+                    format!("a{}", graphviz_id)
+                } else {
+                    String::new()
+                }
+            }
         };
         format!("{} [label=\"{}\"]\n", graphviz_id, label)
     }
@@ -244,17 +260,17 @@ impl Aig {
             match &*node.borrow() {
                 AigNode::False => decl_false_node_optional.push_str(&format!(
                     "{} {}\n",
-                    node.borrow().graphviz_decl(None),
+                    node.borrow().graphviz_decl(None, graphviz_style.debug),
                     graphviz_style.cst_false
                 )),
                 AigNode::Input(_) => {
-                    decl_inputs.push_str(&node.borrow().graphviz_decl(None));
+                    decl_inputs.push_str(&node.borrow().graphviz_decl(None, graphviz_style.debug));
                 }
                 AigNode::Latch { .. } => {
-                    decl_latches.push_str(&node.borrow().graphviz_decl(None));
+                    decl_latches.push_str(&node.borrow().graphviz_decl(None, graphviz_style.debug));
                 }
                 AigNode::And { .. } => {
-                    decl_ands.push_str(&node.borrow().graphviz_decl(None));
+                    decl_ands.push_str(&node.borrow().graphviz_decl(None, graphviz_style.debug));
                 }
             }
             for fanin in node.borrow().get_fanins() {
@@ -388,17 +404,30 @@ impl Miter {
             match &*node.borrow() {
                 AigNode::False => decl_false_node_optional.push_str(&format!(
                     "{} {}\n",
-                    node.borrow().graphviz_decl(Some("a".to_string())),
+                    node.borrow()
+                        .graphviz_decl(Some("a".to_string()), graphviz_style.debug),
                     graphviz_style.cst_false
                 )),
                 AigNode::Input(_) => {
-                    decl_inputs.push_str(&node.borrow().graphviz_decl(Some("a".to_string())));
+                    decl_inputs.push_str(
+                        &node
+                            .borrow()
+                            .graphviz_decl(Some("a".to_string()), graphviz_style.debug),
+                    );
                 }
                 AigNode::Latch { .. } => {
-                    decl_latches.push_str(&node.borrow().graphviz_decl(Some("a".to_string())));
+                    decl_latches.push_str(
+                        &node
+                            .borrow()
+                            .graphviz_decl(Some("a".to_string()), graphviz_style.debug),
+                    );
                 }
                 AigNode::And { .. } => {
-                    decl_ands_a.push_str(&node.borrow().graphviz_decl(Some("a".to_string())));
+                    decl_ands_a.push_str(
+                        &node
+                            .borrow()
+                            .graphviz_decl(Some("a".to_string()), graphviz_style.debug),
+                    );
                 }
             }
             for fanin in node.borrow().get_fanins() {
@@ -418,7 +447,11 @@ impl Miter {
         while let Some(node) = dfs.next(&self.b) {
             match &*node.borrow() {
                 AigNode::And { .. } => {
-                    decl_ands_b.push_str(&node.borrow().graphviz_decl(Some("b".to_string())));
+                    decl_ands_b.push_str(
+                        &node
+                            .borrow()
+                            .graphviz_decl(Some("b".to_string()), graphviz_style.debug),
+                    );
                 }
                 _ => (),
             }
@@ -475,12 +508,12 @@ mod test {
 
     use super::*;
 
-    fn circuit_to_dot<P: AsRef<Path>>(path: P) {
+    fn circuit_to_dot<P: AsRef<Path>>(path: P, graphviz_style: GraphvizStyle) {
         let aig = Aig::from_file(path).unwrap();
-        println!("{}", aig.to_dot(GraphvizStyle::default()));
+        println!("{}", aig.to_dot(graphviz_style));
     }
 
-    fn circuit_miter_to_dot<P: AsRef<Path>>(path: P) {
+    fn circuit_miter_to_dot<P: AsRef<Path>>(path: P, graphviz_style: GraphvizStyle) {
         let aig = Aig::from_file(path).unwrap();
 
         // Creating a miter between two copies of the circuit
@@ -495,26 +528,30 @@ mod test {
             .collect();
 
         let miter = Miter::new(&aig, &aig, outputs_map).unwrap();
-        println!("{}", miter.to_dot(GraphvizStyle::default()));
+        println!("{}", miter.to_dot(graphviz_style));
     }
 
     #[test]
     fn half_adder_to_dot() {
-        circuit_to_dot("assets/circuits/half-adder.aag");
+        circuit_to_dot("assets/circuits/half-adder.aag", GraphvizStyle::default());
+        circuit_to_dot("assets/circuits/half-adder.aag", GraphvizStyle::debug());
     }
 
     #[test]
     fn half_adder_miter_to_dot() {
-        circuit_miter_to_dot("assets/circuits/half-adder.aag");
+        circuit_miter_to_dot("assets/circuits/half-adder.aag", GraphvizStyle::default());
+        circuit_miter_to_dot("assets/circuits/half-adder.aag", GraphvizStyle::debug());
     }
 
     #[test]
     fn ctrl_to_dot() {
-        circuit_to_dot("assets/circuits/ctrl.aig");
+        circuit_to_dot("assets/circuits/ctrl.aig", GraphvizStyle::default());
+        circuit_to_dot("assets/circuits/ctrl.aig", GraphvizStyle::debug());
     }
 
     #[test]
     fn ctrl_miter_to_dot() {
-        circuit_miter_to_dot("assets/circuits/ctrl.aig");
+        circuit_miter_to_dot("assets/circuits/ctrl.aig", GraphvizStyle::default());
+        circuit_miter_to_dot("assets/circuits/ctrl.aig", GraphvizStyle::debug());
     }
 }
