@@ -275,7 +275,12 @@ impl AigNode {
                 let old_size = fanouts.len();
                 fanouts.retain(|weak| {
                     if let Some(node) = weak.upgrade() {
-                        node != fanout
+                        let fan = fanout.borrow();
+
+                        let no = node.borrow();
+
+                        let res = no.deref() == fan.deref();
+                        res
                     } else {
                         false
                     }
@@ -320,31 +325,29 @@ impl AigNode {
     }
 
     /// This function also updates fanouts of previous and new fanins.
-    fn set_fanin(&mut self, fanin: &AigEdge, fanin_id: FaninId) -> Result<()> {
-        let self_id = self.get_id();
+    fn set_fanin(
+        &mut self,
+        fanin: &AigEdge,
+        fanin_id: FaninId,
+        self_weak: AigNodeWeak,
+    ) -> Result<()> {
         match (self, fanin_id) {
             (AigNode::And { fanin0, .. }, FaninId::Fanin0) => {
                 fanin0
                     .get_node()
                     .borrow_mut()
-                    .remove_fanout(fanin.get_node())?;
+                    .remove_fanout(self_weak.upgrade().unwrap())?;
                 *fanin0 = fanin.clone();
-                fanin0
-                    .get_node()
-                    .borrow_mut()
-                    .add_fanout(Rc::downgrade(self))?; // problem : mut and non-mut reference need to exist at the same time...
+                fanin0.get_node().borrow_mut().add_fanout(self_weak)?; // problem : mut and non-mut reference need to exist at the same time...
                 Ok(())
             }
             (AigNode::And { fanin1, .. }, FaninId::Fanin1) => {
                 fanin1
                     .get_node()
                     .borrow_mut()
-                    .remove_fanout(fanin.get_node())?;
+                    .remove_fanout(self_weak.upgrade().unwrap())?;
                 *fanin1 = fanin.clone();
-                fanin1
-                    .get_node()
-                    .borrow_mut()
-                    .add_fanout(Rc::downgrade(self))?;
+                fanin1.get_node().borrow_mut().add_fanout(self_weak)?;
                 Ok(())
             }
             (AigNode::Latch { next, .. }, FaninId::Fanin0) => Ok(*next = fanin.clone()),
@@ -732,7 +735,8 @@ impl Aig {
             complement,
         };
 
-        parent.borrow_mut().set_fanin(&fanin, fanin_id)
+        let weak_parent = Rc::downgrade(&parent);
+        parent.borrow_mut().set_fanin(&fanin, fanin_id, weak_parent)
     }
 
     /// Replace a node by another existing node.
@@ -764,8 +768,12 @@ impl Aig {
         if new.borrow().is_and() {
             let fanins = new.borrow().get_fanins();
 
-            old.borrow_mut().set_fanin(&fanins[0], FaninId::Fanin0)?;
-            old.borrow_mut().set_fanin(&fanins[1], FaninId::Fanin1)?;
+            let weak_old = Rc::downgrade(&old);
+
+            old.borrow_mut()
+                .set_fanin(&fanins[0], FaninId::Fanin0, weak_old.clone())?;
+            old.borrow_mut()
+                .set_fanin(&fanins[1], FaninId::Fanin1, weak_old)?;
             old.borrow_mut().set_id(id)?;
         } else if new.borrow().is_false() || new.borrow().is_input() {
             old.borrow_mut().set_id(id)?;
