@@ -1,3 +1,4 @@
+mod clone;
 pub mod cnf;
 pub mod dfs;
 pub mod dot;
@@ -461,6 +462,11 @@ impl AigNode {
 ///
 /// The use of [`Rc`] allows us not to worry about having to drop manually nodes that are no longer used, eg.
 /// nodes that were used before by node `A` as their `fanin0`, but `A` is rewritten to use another `fanin0`.
+///
+///
+/// Note that [`Aig::clone`] will perform a shallow copy of the AIG (the nodes won't be copied).
+/// If you want to recursively clone the data structure (ie not incrementing Rc
+/// but creating new nodes), use [`Aig::deep_clone`] instead.
 #[derive(Debug, Clone)]
 pub struct Aig {
     nodes: HashMap<NodeId, AigNodeWeak>,
