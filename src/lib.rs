@@ -168,7 +168,7 @@ pub enum AigNode {
         id: NodeId,
         fanin0: AigEdge,
         fanin1: AigEdge,
-        fanouts: Vec<AigNodeWeak>,
+        fanouts: HashMap<NodeId, AigNodeWeak>,
     },
 }
 
@@ -222,7 +222,7 @@ impl AigNode {
             id,
             fanin0,
             fanin1,
-            fanouts: Vec::new(),
+            fanouts: HashMap::new(),
         }
     }
 
@@ -251,50 +251,63 @@ impl AigNode {
         }
     }
 
-    pub fn get_and_fanouts(&self) -> Option<Vec<AigNodeWeak>> {
+    pub fn get_and_fanouts(&self) -> Option<HashMap<NodeId, AigNodeWeak>> {
         match self {
             AigNode::And { fanouts, .. } => Some(fanouts.clone()),
             _ => None,
         }
     }
 
-    pub fn add_fanout(&mut self, fanout: AigNodeWeak) -> Result<()> {
+    /// Okay, what is going on here is a bit subtle.
+    /// The core problem is that in practice, the `fanout` is mutably owned by the caller.
+    /// The first approach of taking an `AigNodeRef` as an argument, and computing the `NodeId`
+    /// by borrowing doesn't work : we are not allowed to borrow!
+    /// So we need to supply the id of the fanout to store and be able to identify the fanout,
+    /// without borrowing the `AigNodeRef`.
+    fn add_fanout(&mut self, fanout_id: NodeId, fanout: AigNodeWeak) -> Result<()> {
         match self {
             AigNode::And { fanouts, .. } => {
-                fanouts.push(fanout);
+                fanouts.insert(fanout_id, fanout);
                 Ok(())
             }
             _ => Ok(()),
         }
     }
 
-    pub fn remove_fanout(&mut self, fanout: AigNodeRef) -> Result<()> {
+    /// What is going on with fanouts is a bit subtle, check [`AigNode::add_fanout`] for more information.
+    fn remove_fanout(&mut self, fanout_id: NodeId) -> Result<()> {
         match self {
             AigNode::And { fanouts, .. } => {
-                fanouts.retain(|weak| weak.upgrade().is_some());
+                fanouts.retain(|_, weak| weak.upgrade().is_some());
                 let old_size = fanouts.len();
-                fanouts.retain(|weak| {
-                    if let Some(node) = weak.upgrade() {
-                        let fan = fanout.borrow();
-
-                        let no = node.borrow();
-
-                        let res = no.deref() == fan.deref();
-                        res
-                    } else {
-                        false
-                    }
-                });
+                fanouts.retain(|&id, _| id != fanout_id);
                 let new_size = fanouts.len();
                 if new_size < old_size {
                     Ok(())
                 } else {
                     Err(AigError::InvalidState(format!(
                         "failed to remove fanout {} (not found) from node {}",
-                        fanout.borrow().get_id(),
+                        fanout_id,
                         self.get_id()
                     )))
                 }
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn update_fanout_entry(&mut self, old_fanout_id: NodeId, new_fanout_id: NodeId) -> Result<()> {
+        let self_id = self.get_id();
+        match self {
+            AigNode::And { fanouts, .. } => {
+                let weak = fanouts
+                    .remove(&old_fanout_id)
+                    .ok_or(AigError::InvalidState(format!(
+                        "failed to update fanout {} (not found) to {} from node {}",
+                        old_fanout_id, new_fanout_id, self_id
+                    )))?;
+                fanouts.insert(new_fanout_id, weak);
+                Ok(())
             }
             _ => Ok(()),
         }
@@ -306,9 +319,29 @@ impl AigNode {
     /// Make sure you update the [`Aig::nodes`] map with the new id.
     ///
     /// This function was originally proposed to implement [`Aig::minimize_ids`].
+    ///
+    /// Note that fanouts must also be taken into account.
+    /// Here, we must update the fanout keys of the fanins of this node.
     fn set_id(&mut self, id: NodeId) -> Result<()> {
         match self {
-            AigNode::And { id: eid, .. } => Ok(*eid = id),
+            AigNode::And {
+                id: eid,
+                fanin0,
+                fanin1,
+                ..
+            } => {
+                fanin0
+                    .get_node()
+                    .borrow_mut()
+                    .update_fanout_entry(*eid, id)?;
+                fanin1
+                    .get_node()
+                    .borrow_mut()
+                    .update_fanout_entry(*eid, id)?;
+
+                *eid = id;
+                Ok(())
+            }
             _ => Err(AigError::InvalidState(format!(
                 "you are trying to rewrite id of false/input/latch node with current id={}, there is no good reason you are trying to do that",
                 self.get_id()
@@ -331,23 +364,24 @@ impl AigNode {
         fanin_id: FaninId,
         self_weak: AigNodeWeak,
     ) -> Result<()> {
+        let self_id = self.get_id();
         match (self, fanin_id) {
             (AigNode::And { fanin0, .. }, FaninId::Fanin0) => {
+                fanin0.get_node().borrow_mut().remove_fanout(self_id)?;
+                *fanin0 = fanin.clone();
                 fanin0
                     .get_node()
                     .borrow_mut()
-                    .remove_fanout(self_weak.upgrade().unwrap())?;
-                *fanin0 = fanin.clone();
-                fanin0.get_node().borrow_mut().add_fanout(self_weak)?; // problem : mut and non-mut reference need to exist at the same time...
+                    .add_fanout(self_id, self_weak)?;
                 Ok(())
             }
             (AigNode::And { fanin1, .. }, FaninId::Fanin1) => {
+                fanin1.get_node().borrow_mut().remove_fanout(self_id)?;
+                *fanin1 = fanin.clone();
                 fanin1
                     .get_node()
                     .borrow_mut()
-                    .remove_fanout(self_weak.upgrade().unwrap())?;
-                *fanin1 = fanin.clone();
-                fanin1.get_node().borrow_mut().add_fanout(self_weak)?;
+                    .add_fanout(self_id, self_weak)?;
                 Ok(())
             }
             (AigNode::Latch { next, .. }, FaninId::Fanin0) => Ok(*next = fanin.clone()),
@@ -665,11 +699,11 @@ impl Aig {
                         fanin0
                             .get_node()
                             .borrow_mut()
-                            .add_fanout(Rc::downgrade(&n))?;
+                            .add_fanout(id, Rc::downgrade(&n))?;
                         fanin1
                             .get_node()
                             .borrow_mut()
-                            .add_fanout(Rc::downgrade(&n))?;
+                            .add_fanout(id, Rc::downgrade(&n))?;
                         None
                     }
                     _ => None,
@@ -778,7 +812,7 @@ impl Aig {
         } else if new.borrow().is_false() || new.borrow().is_input() {
             old.borrow_mut().set_id(id)?;
         } else {
-            panic!("replacing latch: unsupported features for now");
+            panic!("replacing by a latch: unsupported feature for now");
         }
 
         // Keeping the map updated
@@ -792,7 +826,7 @@ impl Aig {
                 .get_and_fanouts()
                 .unwrap() // unwrap cause old is supposed to be an and gate and have fanouts
                 .iter()
-                .filter_map(|weak| weak.upgrade())
+                .filter_map(|(_, weak)| weak.upgrade())
                 .collect();
 
             for fanout in fanouts {
@@ -974,7 +1008,7 @@ impl Aig {
                 if *id == 0 {
                     return Err(AigError::IdZeroButNotFalse);
                 }
-                for fanout_weak in fanouts {
+                for (_, fanout_weak) in fanouts {
                     if let Some(fanout) = fanout_weak.upgrade() {
                         if !self.nodes.contains_key(&fanout.borrow().get_id()) {
                             return Err(AigError::InvalidState(format!(
