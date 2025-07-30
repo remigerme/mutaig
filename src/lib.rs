@@ -606,11 +606,11 @@ impl Aig {
         Ok(sort)
     }
 
-    fn check_valid_node_to_add(&self, node: AigNode) -> Result<()> {
+    fn check_valid_node_to_add(&self, node: &AigNode) -> Result<()> {
         match node {
             AigNode::False => Ok(()),
             AigNode::Input(id) => {
-                if id == 0 {
+                if *id == 0 {
                     Err(AigError::IdZeroButNotFalse)
                 } else {
                     Ok(())
@@ -619,7 +619,7 @@ impl Aig {
             AigNode::And {
                 id, fanin0, fanin1, ..
             } => {
-                if id == 0 {
+                if *id == 0 {
                     Err(AigError::IdZeroButNotFalse)
                 } else {
                     let fanin0_id = fanin0.node.borrow().get_id();
@@ -634,7 +634,7 @@ impl Aig {
                 }
             }
             AigNode::Latch { id, next, .. } => {
-                if id == 0 {
+                if *id == 0 {
                     Err(AigError::IdZeroButNotFalse)
                 } else {
                     let next_id = next.node.borrow().get_id();
@@ -681,7 +681,7 @@ impl Aig {
     /// );
     /// ```
     pub fn add_node(&mut self, node: AigNode) -> Result<AigNodeRef> {
-        self.check_valid_node_to_add(node.clone())?;
+        self.check_valid_node_to_add(&node)?;
 
         let id = node.get_id();
         match self.get_node(id) {
@@ -942,8 +942,7 @@ impl Aig {
     ///   $id(z) \gt id(a) \geq id(b)$
     /// You can use [`Aig::minimize_ids`] to mutate the current AIG into an AIGER-compliant AIG.
     pub fn is_valid_aiger() -> bool {
-        // todo
-        return true;
+        todo!()
     }
 
     /// Checking if the AIG structure is correct.
