@@ -838,6 +838,14 @@ impl Aig {
             for fanout in fanouts {
                 fanout.borrow_mut().invert_edge(id)?;
             }
+
+            // Also, this node might be an output node ie have no fanout but still have an edge going out.
+            for output in &mut self.outputs {
+                let output_id = output.get_node().borrow().get_id();
+                if output_id == id {
+                    output.complement = !output.complement;
+                }
+            }
         }
 
         Ok(())
