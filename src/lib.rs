@@ -1008,8 +1008,15 @@ impl Aig {
                 if *id == 0 {
                     return Err(AigError::IdZeroButNotFalse);
                 }
-                for (_, fanout_weak) in fanouts {
+                for (fanout_id, fanout_weak) in fanouts {
                     if let Some(fanout) = fanout_weak.upgrade() {
+                        let fanout_id_real = fanout.borrow().get_id();
+                        if *fanout_id != fanout_id_real {
+                            return Err(AigError::InvalidState(format!(
+                                "incoherent fanout node id : {} in map vs {} in reality",
+                                fanout_id, fanout_id_real
+                            )));
+                        }
                         if !self.nodes.contains_key(&fanout.borrow().get_id()) {
                             return Err(AigError::InvalidState(format!(
                                 "fanout {} is no longer in the AIG",
@@ -1026,10 +1033,11 @@ impl Aig {
     }
 
     fn check_edge_integrity(&self, fanin: &AigEdge) -> Result<()> {
-        self.get_node(fanin.node.borrow().get_id())
-            .ok_or(AigError::InvalidState(
-                "edge pointing at a node node in aig".to_string(),
-            ))?;
+        let id = fanin.node.borrow().get_id();
+        self.get_node(id).ok_or(AigError::InvalidState(format!(
+            "edge pointing at node {} which is not in the AIG anymore",
+            id
+        )))?;
         Ok(())
     }
 }
