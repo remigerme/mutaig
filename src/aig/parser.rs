@@ -1,6 +1,6 @@
 use std::{fs::File, io::BufReader, path::Path};
 
-use crate::{Aig, ParserError, Result};
+use crate::{Aig, Result, aig::error::ParserError};
 
 fn read_u64(s: &str) -> std::result::Result<u64, ParserError> {
     s.parse::<u64>()
@@ -63,7 +63,8 @@ impl TryFrom<&String> for Header {
 /// Parser for the ASCII AIGER format.
 mod ascii {
     use crate::{
-        Aig, AigEdge, AigNode, NodeId, ParserError, Result,
+        Aig, AigEdge, AigNode, NodeId, Result,
+        aig::error::ParserError,
         aig::parser::{Header, check_even, read_u64},
     };
     use std::io::{BufRead, BufReader, Read};
@@ -410,7 +411,8 @@ mod bin {
     use std::io::{BufRead, BufReader, Read};
 
     use crate::{
-        Aig, AigEdge, AigError, AigNode, NodeId, ParserError, Result,
+        Aig, AigEdge, AigError, AigNode, NodeId, Result,
+        aig::error::ParserError,
         aig::parser::{Header, read_u64},
     };
 
