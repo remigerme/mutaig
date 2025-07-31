@@ -1,3 +1,11 @@
+//! Contains the AIG errors.
+//!
+//! See [`AigError`] for most of the errors occuring during building, using or mutating an AIG,
+//! or [`ParserError`] specifically for errors happening during parsing from AIGER format
+//! (when using [`Aig::from_file`]).
+//!
+//! [`Aig::from_file`]: crate::Aig::from_file
+
 use thiserror::Error;
 
 use crate::miter::MiterError;
@@ -24,6 +32,8 @@ pub enum AigError {
 
     /// Invalid operation on a node which does not have such specified fanin.
     /// Latches only have [`FaninId::Fanin0`].
+    ///
+    /// [`FaninId::Fanin0`]: crate::FaninId::Fanin0
     #[error("the node has no such fanin")]
     NoFanin,
 
@@ -35,7 +45,7 @@ pub enum AigError {
 
     /// Just forwarding a [`MiterError`].
     ///
-    /// [`MiterError`]: miter::MiterError
+    /// [`MiterError`]: crate::miter::MiterError
     #[error("{0}")]
     MiterError(#[from] MiterError),
 

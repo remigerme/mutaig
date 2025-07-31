@@ -1,3 +1,7 @@
+//! An [`AigEdge`] points at an [`AigNode`] and can be complemented (indicates the presence of a NOT gate).
+//!
+//! [`AigNode`]: crate::AigNode
+
 use std::ops::Not;
 
 use super::AigNodeRef;

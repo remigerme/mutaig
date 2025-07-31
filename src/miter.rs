@@ -1,3 +1,12 @@
+//! The struct used to perform combinational equivalence checking between two AIGs.
+//!
+//! For background on what is a miter, please check
+//! [Verification of large synthesized designs](https://doi.org/10.1109/ICCAD.1993.580110) by D. Brand.
+//!
+//! To see how to use it in practice, check [`Miter`] and [`cnf`] docs.
+//!
+//! [`cnf`]: crate::cnf
+
 use std::{
     cmp::max,
     collections::{HashMap, HashSet},

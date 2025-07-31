@@ -1,3 +1,10 @@
+//! Define [`AigNode`] and its commonly used alias [`AigNodeRef`].
+//!
+//! In an AIG, nodes are wrapped by [`Rc<RefCell<AigNode>>`], so in practice
+//! you often deal with [`AigNodeRef`] (alias for the previous type) instead.
+//!
+//! For internal use, you can also use `AigNodeWeak` sometimes.
+
 use std::{
     cell::RefCell,
     collections::HashMap,

@@ -41,25 +41,25 @@ let node_false = aig.add_node(AigNode::False).unwrap();
 let i1 = aig.add_node(AigNode::Input(1)).unwrap();
 let i2 = aig.add_node(AigNode::Input(2)).unwrap();
 let a3 = aig
-    .add_node(AigNode::And {
-        id: 3,
-        fanin0: AigEdge::new(node_false.clone(), true),
-        fanin1: AigEdge::new(i1.clone(), false),
-    })
+    .add_node(AigNode::and(
+        3,
+        AigEdge::new(node_false.clone(), true),
+        AigEdge::new(i1.clone(), false),
+    ))
     .unwrap();
 let a4 = aig
-    .add_node(AigNode::And {
-        id: 4,
-        fanin0: AigEdge::new(i1.clone(), true),
-        fanin1: AigEdge::new(i2.clone(), false),
-    })
+    .add_node(AigNode::And(
+        4,
+        AigEdge::new(i1.clone(), true),
+        AigEdge::new(i2.clone(), false),
+    ))
     .unwrap();
 let a5 = aig
-    .add_node(AigNode::And {
-        id: 5,
-        fanin0: AigEdge::new(a3.clone(), false),
-        fanin1: AigEdge::new(a4.clone(), true),
-    })
+    .add_node(AigNode::And(
+        5,
+        AigEdge::new(a3.clone(), false),
+        AigEdge::new(a4.clone(), true),
+    ))
     .unwrap();
 
 aig.add_output(5, true).unwrap();
@@ -69,7 +69,6 @@ aig.update();
 In practice, you will probably never have to build an AIG by hand. Instead, you can use the `Aig::from_file` function:
 
 ```rust
-use std::path::Path;
 use mutaig::Aig;
 
 let mut aig = Aig::from_file("myfile.aag").unwrap();
@@ -236,7 +235,4 @@ Inspired by [aig-rs](https://github.com/gipsyh/aig-rs).
 
 # TODO
 
-- miter tests
-- parser bin tests
-- more tests
-- more docs
+- more tests (bin parser, miter, mutations, deep clone with mutations, fanouts integrity)

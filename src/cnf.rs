@@ -1,4 +1,4 @@
-//! Generate miters between two circuits and the resulting SAT formula as a CNF.
+//! Extract a SAT formula from a previously generated [`Miter`].
 //!
 //! To prove combinational equivalence checking (CEC) between two circuits `a` and `b`:
 //! - generate miter from `a` and `b` with [`Miter::new`]
@@ -7,12 +7,20 @@
 //!
 //! If the resulting CNF is SAT, it means that the two circuits are **not equivalent**.
 //!
-//! This is already implemented in [`Miter::extract_cnf_node`] and [`Miter::extract_cnf`].
+//! The core methods to extract a SAT formula are:
+//! - [`Miter::extract_cnf_node`] if you want to prove the equivalence of two internal nodes.
+//!   Once the nodes are proven equivalent, merge them using [`Miter::merge`].
+//! - [`Miter::extract_cnf`] if you wat to prove the equivalence of the whole circuits.
 //!
+//! Note that you can also try to merge obviously equivalent internal nodes with
+//! [`Miter::mergeable`] then [`Miter::merge`].
+//!
+//! [`Miter`]: crate::miter::Miter
 //! [`Miter::new`]: crate::miter::Miter::new
-//! [`Cnf`]: Cnf
 //! [`Miter::extract_cnf_node`]: crate::miter::Miter::extract_cnf_node
 //! [`Miter::extract_cnf`]: crate::miter::Miter::extract_cnf
+//! [`Miter::merge`]: crate::miter::Miter::merge
+//! [`Miter::mergeable`]: crate::miter::Miter::mergeable
 
 use std::{collections::HashMap, num::TryFromIntError, ops::Not};
 

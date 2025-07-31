@@ -1,3 +1,7 @@
+//! Module defining the [`Aig`] struct, as well as [`AigNode`], [`AigEdge`] and some others relevant structs.
+//!
+//! To start proving combinational equivalence, check [`crate::cnf`] and [`crate::miter::Miter`] docs.
+
 mod clone;
 pub mod dfs;
 pub mod dot;
@@ -31,9 +35,9 @@ pub use node::{AigNode, AigNodeRef, NodeId};
 /// [`.update()`]: Aig::update
 /// [`.new_and(id, fanin0, fanin1)`]: Aig::new_and
 ///
-/// The use of [`Rc`] allows us not to worry about having to drop manually nodes that are no longer used, eg.
-/// nodes that were used before by node `A` as their `fanin0`, but `A` is rewritten to use another `fanin0`.
-///
+/// The use of [`Rc`] and [`AigNodeRef`] allows us not to worry about having to drop manually nodes
+/// that are no longer used, eg. nodes that were used before by node `A` as their `fanin0`,
+/// but `A` is rewritten to use another `fanin0`.
 ///
 /// Note that [`Aig::clone`] will perform a shallow copy of the AIG (the nodes won't be copied).
 /// If you want to recursively clone the data structure (ie not incrementing Rc
