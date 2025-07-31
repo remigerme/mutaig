@@ -109,15 +109,11 @@ impl Dfs {
     /// [`from_outputs`]: Dfs::from_outputs
     pub fn next(&mut self, aig: &Aig) -> Option<AigNodeRef> {
         while let Some(id) = self.stack.pop() {
-            if aig.get_node(id).is_none() {
-                eprintln!("DEBUG - NODE DOES NOT EXIST {}", id);
-            }
             let node = aig.get_node(id).unwrap();
             for child in node.borrow().get_fanins() {
                 let child_id = child.get_node().borrow().get_id();
                 if !self.seen.contains(&child_id) {
                     self.seen.insert(child_id);
-                    eprintln!("DEBUG - adding {}", child_id);
                     self.stack.push(child_id);
                 }
             }
