@@ -64,7 +64,7 @@ impl TryFrom<&String> for Header {
 mod ascii {
     use crate::{
         Aig, AigEdge, AigNode, NodeId, ParserError, Result,
-        parser::{Header, check_even, read_u64},
+        aig::parser::{Header, check_even, read_u64},
     };
     use std::io::{BufRead, BufReader, Read};
 
@@ -411,7 +411,7 @@ mod bin {
 
     use crate::{
         Aig, AigEdge, AigError, AigNode, NodeId, ParserError, Result,
-        parser::{Header, read_u64},
+        aig::parser::{Header, read_u64},
     };
 
     fn read_and_partially_register_latch(
