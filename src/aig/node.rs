@@ -15,7 +15,8 @@ pub type NodeId = u64;
 /// An AIG node.
 ///
 /// Each node has an id. By convention, id for constant node `False` is 0. The id must be unique.
-/// Also, and gates carry their fanouts with them. Make sure to update this correctly.
+///
+/// Internal note: gates carry their fanouts with them. Make sure to update this correctly.
 #[derive(Debug, Clone)]
 pub enum AigNode {
     /// The constant low/false signal.
@@ -44,6 +45,8 @@ pub type AigNodeRef = Rc<RefCell<AigNode>>;
 pub(crate) type AigNodeWeak = Weak<RefCell<AigNode>>;
 
 impl PartialEq for AigNode {
+    /// We just compare each field one by one, except [`AigNode::And::fanouts`].
+    /// This is the equality which would have been derived if this field did not exist.
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (AigNode::False, AigNode::False) => true,
@@ -82,13 +85,31 @@ impl PartialEq for AigNode {
 impl Eq for AigNode {}
 
 impl AigNode {
+    /// Returns a new and gate (initialize empty fanouts).
     pub fn and(id: NodeId, fanin0: AigEdge, fanin1: AigEdge) -> Self {
+        if id == 0 {
+            panic!(
+                "Hey, you are trying to create an AND gate with id=0. \
+                Id=0 is reserved for the constant node AigNode::False."
+            )
+        }
         AigNode::And {
             id,
             fanin0,
             fanin1,
             fanouts: HashMap::new(),
         }
+    }
+
+    /// Returns a new latch.
+    pub fn latch(id: NodeId, next: AigEdge, init: Option<bool>) -> Self {
+        if id == 0 {
+            panic!(
+                "Hey, you are trying to create a latch with id=0. \
+                Id=0 is reserved for the constant node AigNode::False."
+            )
+        }
+        AigNode::Latch { id, next, init }
     }
 
     pub fn is_false(&self) -> bool {
@@ -116,6 +137,7 @@ impl AigNode {
         }
     }
 
+    /// Returns fanouts as a hashmap if the node is an and gate, else returns [`None`].
     pub fn get_and_fanouts(&self) -> Option<HashMap<NodeId, AigNodeWeak>> {
         match self {
             AigNode::And { fanouts, .. } => Some(fanouts.clone()),
@@ -161,6 +183,8 @@ impl AigNode {
         }
     }
 
+    /// What is going on with fanouts is a bit subtle, check [`AigNode::add_fanout`] for more information.
+    /// You can also check the code of [`AigNode::remove_fanout`].
     fn update_fanout_entry(&mut self, old_fanout_id: NodeId, new_fanout_id: NodeId) -> Result<()> {
         let self_id = self.get_id();
         match self {
@@ -187,6 +211,9 @@ impl AigNode {
     ///
     /// Note that fanouts must also be taken into account.
     /// Here, we must update the fanout keys of the fanins of this node.
+    ///
+    /// [`Aig::nodes`]: super::Aig::nodes
+    /// [`Aig::minimize_ids`]: super::Aig::minimize_ids
     pub(super) fn set_id(&mut self, id: NodeId) -> Result<()> {
         match self {
             AigNode::And {
@@ -297,6 +324,11 @@ impl AigNode {
     }
 
     /// Reorders fanins to make sure fanin0_id >= fanin1_id for AND gates.
+    ///
+    /// This is part of the AIGER binary format requirements, and is part of
+    /// the [`Aig::minimize_ids`] procedure.
+    ///
+    /// [`Aig::minimize_ids`]: super::Aig::minimize_ids
     pub(super) fn reorder_fanins(&mut self) {
         match self {
             AigNode::And { fanin0, fanin1, .. } => {
@@ -308,5 +340,26 @@ impl AigNode {
             }
             _ => (),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{cell::RefCell, rc::Rc};
+
+    use crate::{AigEdge, AigNode};
+
+    #[test]
+    #[should_panic]
+    fn add_node_test_invalid_latch_id0() {
+        let nf = Rc::new(RefCell::new(AigNode::False));
+        let _ = AigNode::latch(0, AigEdge::new(nf, false), None);
+    }
+
+    #[test]
+    #[should_panic]
+    fn add_node_test_invalid_and_id0() {
+        let nf = Rc::new(RefCell::new(AigNode::False));
+        let _ = AigNode::and(0, AigEdge::new(nf.clone(), false), AigEdge::new(nf, false));
     }
 }

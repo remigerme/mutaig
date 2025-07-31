@@ -254,11 +254,11 @@ mod ascii {
         // Adding latches
         // First step: add and nodes with dummy edges to node false
         for &(id, _, _, init) in &latches {
-            aig.add_node(AigNode::Latch {
-                id: id,
-                next: AigEdge::new(node_false.clone(), false),
-                init: init,
-            })?;
+            aig.add_node(AigNode::latch(
+                id,
+                AigEdge::new(node_false.clone(), false),
+                init,
+            ))?;
         }
 
         // Adding and gates
@@ -461,11 +461,7 @@ mod bin {
 
         // Partially registering latch with a dummy fanin
         let dummy = aig.get_node(0).unwrap();
-        aig.add_node(AigNode::Latch {
-            id,
-            next: AigEdge::new(dummy, false),
-            init,
-        })?;
+        aig.add_node(AigNode::latch(id, AigEdge::new(dummy, false), init))?;
 
         // Returning the fanin information for later
         Ok((id, next_id, next_compl))

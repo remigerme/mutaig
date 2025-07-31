@@ -691,27 +691,10 @@ mod test {
     }
 
     #[test]
-    fn add_node_test_invalid_id0() {
+    fn add_node_test_invalid_input_id0() {
         let mut a = Aig::new();
-        // Even if False node does not exist in the AIG
         assert!(a.add_node(AigNode::Input(0)).is_err());
-        let i1 = a.add_node(AigNode::Input(1)).unwrap();
-        assert!(
-            a.add_node(AigNode::and(
-                0,
-                AigEdge::new(i1.clone(), false),
-                AigEdge::new(i1.clone(), false)
-            ))
-            .is_err()
-        );
-        assert!(
-            a.add_node(AigNode::Latch {
-                id: 0,
-                next: AigEdge::new(i1.clone(), false),
-                init: None
-            })
-            .is_err()
-        );
+        // For other variants, we use the constructors and it should panic.
     }
 
     #[test]
@@ -730,11 +713,11 @@ mod test {
         );
 
         assert!(
-            a.add_node(AigNode::Latch {
-                id: 1,
-                next: AigEdge::new(fake_input.clone(), false),
-                init: None
-            })
+            a.add_node(AigNode::latch(
+                1,
+                AigEdge::new(fake_input.clone(), false),
+                None
+            ))
             .is_err()
         );
     }
@@ -866,11 +849,7 @@ mod test {
                 AigEdge::new(a2.clone(), false),
             ))
             .unwrap();
-        let _a4 = a.add_node(AigNode::Latch {
-            id: 4,
-            next: AigEdge::new(a3.clone(), true),
-            init: None,
-        });
+        let _a4 = a.add_node(AigNode::latch(4, AigEdge::new(a3.clone(), true), None));
         // Do not save the node - or drop it explicitly later
         a.add_node(AigNode::and(
             5,
@@ -890,11 +869,7 @@ mod test {
                 AigEdge::new(b2.clone(), false),
             ))
             .unwrap();
-        let _b4 = b.add_node(AigNode::Latch {
-            id: 4,
-            next: AigEdge::new(b3.clone(), true),
-            init: None,
-        });
+        let _b4 = b.add_node(AigNode::latch(4, AigEdge::new(b3.clone(), true), None));
         b.add_output(4, false).unwrap();
 
         a.update();
@@ -940,17 +915,13 @@ mod test {
 
         let cf = c.add_node(AigNode::False).unwrap();
         let df = d.add_node(AigNode::False).unwrap();
-        c.add_node(AigNode::Latch {
-            id: 1,
-            next: AigEdge::new(cf.clone(), false),
-            init: None,
-        })
-        .unwrap();
-        d.add_node(AigNode::Latch {
-            id: 1,
-            next: AigEdge::new(df.clone(), false),
-            init: Some(false),
-        })
+        c.add_node(AigNode::latch(1, AigEdge::new(cf.clone(), false), None))
+            .unwrap();
+        d.add_node(AigNode::latch(
+            1,
+            AigEdge::new(df.clone(), false),
+            Some(false),
+        ))
         .unwrap();
     }
 
@@ -990,11 +961,7 @@ mod test {
         let i1 = a.add_node(AigNode::Input(1)).unwrap();
         let _i2 = a.add_node(AigNode::Input(2)).unwrap(); // not used to check if kept alive
         let l3 = a
-            .add_node(AigNode::Latch {
-                id: 3,
-                next: AigEdge::new(i1.clone(), true),
-                init: None,
-            })
+            .add_node(AigNode::latch(3, AigEdge::new(i1.clone(), true), None))
             .unwrap();
         let a8 = a
             .add_node(AigNode::and(
@@ -1017,11 +984,7 @@ mod test {
         let b1 = b.add_node(AigNode::Input(1)).unwrap();
         let _b2 = b.add_node(AigNode::Input(2)).unwrap(); // not used to check if kept alive
         let b3 = b
-            .add_node(AigNode::Latch {
-                id: 3,
-                next: AigEdge::new(b1.clone(), true),
-                init: None,
-            })
+            .add_node(AigNode::latch(3, AigEdge::new(b1.clone(), true), None))
             .unwrap();
         let b4 = b
             .add_node(AigNode::and(

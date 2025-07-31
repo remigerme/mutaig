@@ -603,11 +603,7 @@ mod test {
                 AigEdge::new(a2.clone(), false),
             ))
             .unwrap();
-        let _a4 = a.add_node(AigNode::Latch {
-            id: 4,
-            next: AigEdge::new(a3.clone(), true),
-            init: None,
-        });
+        let _a4 = a.add_node(AigNode::latch(4, AigEdge::new(a3.clone(), true), None));
         a.add_output(4, false).unwrap();
 
         let mut b = Aig::new();
@@ -620,11 +616,11 @@ mod test {
                 AigEdge::new(b1.clone(), false),
             ))
             .unwrap();
-        let _b4 = b.add_node(AigNode::Latch {
-            id: 4,
-            next: AigEdge::new(b3.clone(), false), // next do not matter
-            init: Some(true),                      // init value does not matter
-        });
+        let _b4 = b.add_node(AigNode::latch(
+            4,
+            AigEdge::new(b3.clone(), false), // next do not matter
+            Some(true),                      // init value does not matter
+        ));
         b.add_output(4, false).unwrap();
 
         let outputs = HashMap::from([((4, false), (4, false))]);
