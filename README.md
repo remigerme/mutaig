@@ -142,8 +142,8 @@ If the output of the miter is one, the AIGs are different (their outputs differ 
 
 To do that, let's assume it is true. Then generate some SAT clauses using [Tseytin transformation](https://en.wikipedia.org/wiki/Tseytin_transformation), and give the obtained CNF to a SAT solver:
 
-- if the CNF is UNSAT, then AIGs are proven equivalent
-- else if the CNF is SAT, the AIGs are functionally differ (there exists a set of inputs such that the two AIGs return two different results).
+- if the CNF is UNSAT, then AIGs have been proven proven equivalent
+- else if the CNF is SAT, the AIGs functionally differ (there exists a set of inputs such that the two AIGs return two different results).
 
 In terms of Rust code:
 
