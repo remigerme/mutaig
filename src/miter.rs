@@ -244,7 +244,6 @@ impl Miter {
         node: AigNodeRef,
         cnf: &mut Cnf,
         done: &mut HashSet<NodeId>,
-        merged_a: Option<&HashSet<NodeId>>,
         litmap: &HashMap<u64, Lit>,
     ) -> Result<()> {
         // Invariants for the stack, nodes
@@ -256,11 +255,6 @@ impl Miter {
         let id = node.borrow().get_id();
         if done.contains(&id) {
             return Ok(());
-        }
-        if let Some(merged_set) = merged_a {
-            if merged_set.contains(&id) {
-                return Ok(());
-            }
         }
         stack.push(node);
 
@@ -278,14 +272,7 @@ impl Miter {
                         let fanin_id = fanin.get_node().borrow().get_id();
                         // Has the node been already handled?
                         if !done.contains(&fanin_id) {
-                            // Was a merged set provided? Was the node merged before?
-                            if let Some(merged_set) = merged_a {
-                                if !merged_set.contains(&fanin_id) {
-                                    stack.push(fanin.get_node());
-                                }
-                            } else {
-                                stack.push(fanin.get_node());
-                            }
+                            stack.push(fanin.get_node());
                         }
                     }
                 }
@@ -312,6 +299,11 @@ impl Miter {
     ) -> Result<Cnf> {
         let mut cnf = Cnf::new();
 
+        println!(
+            "EXTRACTING CNF FROM {}({}) AND {}({})",
+            node_a, compl_a, node_b, compl_b
+        );
+
         // Generating clauses from a
         let mut done_a = HashSet::new();
         self.extract_cnf_from(
@@ -320,7 +312,6 @@ impl Miter {
                 .ok_or(AigError::NodeDoesNotExist(node_a))?,
             &mut cnf,
             &mut done_a,
-            Some(&self.merged_a),
             &self.litmap_a,
         )?;
 
@@ -332,7 +323,6 @@ impl Miter {
                 .ok_or(AigError::NodeDoesNotExist(node_b))?,
             &mut cnf,
             &mut done_b,
-            None,
             &self.litmap_b,
         )?;
 
@@ -367,25 +357,13 @@ impl Miter {
         // Generating clauses from a
         let mut done_a = HashSet::new();
         for output in self.a.get_outputs() {
-            self.extract_cnf_from(
-                output.get_node(),
-                &mut cnf,
-                &mut done_a,
-                Some(&self.merged_a),
-                &self.litmap_a,
-            )?;
+            self.extract_cnf_from(output.get_node(), &mut cnf, &mut done_a, &self.litmap_a)?;
         }
 
         // Generating clauses from b
         let mut done_b = HashSet::new();
         for output in self.b.get_outputs() {
-            self.extract_cnf_from(
-                output.get_node(),
-                &mut cnf,
-                &mut done_b,
-                None,
-                &self.litmap_b,
-            )?;
+            self.extract_cnf_from(output.get_node(), &mut cnf, &mut done_b, &self.litmap_b)?;
         }
 
         // Generating final clauses
