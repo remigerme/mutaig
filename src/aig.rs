@@ -274,8 +274,12 @@ impl Aig {
                 // If the node is an input or a latch, we must add it to the map
                 // If the node is an and gate, we must register it as a fanout
                 match n.borrow().deref() {
-                    AigNode::Input(_) => self.inputs.insert(id, n.clone()),
-                    AigNode::Latch { .. } => self.latches.insert(id, n.clone()),
+                    AigNode::Input(_) => {
+                        self.inputs.insert(id, n.clone());
+                    }
+                    AigNode::Latch { .. } => {
+                        self.latches.insert(id, n.clone());
+                    }
                     AigNode::And { fanin0, fanin1, .. } => {
                         fanin0
                             .get_node()
@@ -285,9 +289,8 @@ impl Aig {
                             .get_node()
                             .borrow_mut()
                             .add_fanout(id, Rc::downgrade(&n))?;
-                        None
                     }
-                    _ => None,
+                    _ => (),
                 };
                 Ok(n)
             }
@@ -509,7 +512,7 @@ impl Aig {
         // Updating ids and map
         // Also making sure fanins are correctly ordered (fanin0 >= fanin1)
         let mut new_nodes_map = self.nodes.clone();
-        new_nodes_map.retain(|id, _| *id < 1 + i + l); // keeping only inputs and latches
+        new_nodes_map.retain(|id, _| *id < 1 + i + l); // keeping only inputs and latches (and constant node)
         let mut idx = 1 + i + l;
         for node in new_nodes {
             new_nodes_map.insert(idx, Rc::downgrade(&node));
