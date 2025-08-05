@@ -738,7 +738,24 @@ mod test {
     fn add_node_test_invalid_input_id0() {
         let mut a = Aig::new();
         assert!(a.add_node(AigNode::Input(0)).is_err());
-        // For other variants, we use the constructors and it should panic.
+        // You should use constructors instead of doing this anyway.
+        assert!(
+            a.add_node(AigNode::Latch {
+                id: 0,
+                next: AigEdge::new(a.get_node(0).unwrap(), false),
+                init: None
+            })
+            .is_err()
+        );
+        assert!(
+            a.add_node(AigNode::And {
+                id: 0,
+                fanin0: AigEdge::new(a.get_node(0).unwrap(), false),
+                fanin1: AigEdge::new(a.get_node(0).unwrap(), false),
+                fanouts: HashMap::new()
+            })
+            .is_err()
+        );
     }
 
     #[test]
