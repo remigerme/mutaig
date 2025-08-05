@@ -353,19 +353,131 @@ impl AigNode {
 mod test {
     use std::{cell::RefCell, rc::Rc};
 
-    use crate::{AigEdge, AigNode};
+    use crate::{AigEdge, AigNode, AigNodeRef};
 
-    #[test]
-    #[should_panic]
-    fn add_node_test_invalid_latch_id0() {
-        let nf = Rc::new(RefCell::new(AigNode::False));
-        let _ = AigNode::latch(0, AigEdge::new(nf, false), None);
+    fn wrap(node: AigNode) -> AigNodeRef {
+        Rc::new(RefCell::new(node))
+    }
+
+    fn edge(node: AigNodeRef) -> AigEdge {
+        AigEdge::new(node, false)
     }
 
     #[test]
     #[should_panic]
-    fn add_node_test_invalid_and_id0() {
-        let nf = Rc::new(RefCell::new(AigNode::False));
-        let _ = AigNode::and(0, AigEdge::new(nf.clone(), false), AigEdge::new(nf, false));
+    fn create_node_test_invalid_latch_id0() {
+        let nf = wrap(AigNode::False);
+        let _ = AigNode::latch(0, edge(nf), None);
+    }
+
+    #[test]
+    #[should_panic]
+    fn create_node_test_invalid_and_id0() {
+        let nf = wrap(AigNode::False);
+        let _ = AigNode::and(0, edge(nf.clone()), edge(nf));
+    }
+
+    #[test]
+    fn node_eq_test() {
+        let nf = wrap(AigNode::False);
+        let i1 = wrap(AigNode::Input(1));
+        let a2 = wrap(AigNode::and(2, edge(nf.clone()), edge(i1.clone())));
+        let l3 = wrap(AigNode::latch(3, edge(a2.clone()), None));
+
+        assert_eq!(nf, wrap(AigNode::False));
+
+        assert_eq!(i1, wrap(AigNode::Input(1)));
+        assert_ne!(i1, wrap(AigNode::Input(2)));
+
+        // Note that fanouts are not taken into account for equality
+        assert_eq!(
+            a2,
+            wrap(AigNode::and(2, edge(nf.clone()), edge(i1.clone()),))
+        );
+        // Fanins do not commute
+        assert_ne!(
+            a2,
+            wrap(AigNode::and(2, edge(i1.clone()), edge(nf.clone()),))
+        );
+        assert_ne!(
+            a2,
+            wrap(AigNode::and(2, !edge(nf.clone()), edge(i1.clone()),))
+        );
+        assert_ne!(
+            a2,
+            wrap(AigNode::and(2, edge(nf.clone()), !edge(i1.clone()),))
+        );
+
+        assert_eq!(l3, wrap(AigNode::latch(3, edge(a2.clone()), None,)));
+        assert_ne!(l3, wrap(AigNode::latch(3, edge(a2.clone()), Some(false),)));
+    }
+
+    #[test]
+    fn invert_edge_test() {
+        let i1 = wrap(AigNode::Input(1));
+        let i2 = wrap(AigNode::Input(2));
+        let a3 = wrap(AigNode::and(3, edge(i1.clone()), edge(i2.clone())));
+        let l4 = wrap(AigNode::latch(4, edge(a3.clone()), None));
+
+        assert!(!a3.borrow_mut().get_fanins()[0].complement);
+        assert!(!a3.borrow_mut().get_fanins()[1].complement);
+
+        assert!(a3.borrow_mut().invert_edge(1).is_ok());
+        assert!(a3.borrow_mut().get_fanins()[0].complement);
+        assert!(!a3.borrow_mut().get_fanins()[1].complement);
+
+        assert!(a3.borrow_mut().invert_edge(2).is_ok());
+        assert!(a3.borrow_mut().get_fanins()[0].complement);
+        assert!(a3.borrow_mut().get_fanins()[1].complement);
+
+        assert!(a3.borrow_mut().invert_edge(99).is_err());
+
+        assert!(!l4.borrow_mut().get_fanins()[0].complement);
+
+        assert!(l4.borrow_mut().invert_edge(3).is_ok());
+
+        assert!(l4.borrow_mut().get_fanins()[0].complement);
+        assert!(l4.borrow_mut().invert_edge(99).is_err());
+
+        let nf = wrap(AigNode::False);
+        assert!(nf.borrow_mut().invert_edge(1).is_err());
+
+        let i5 = wrap(AigNode::Input(5));
+        assert!(i5.borrow_mut().invert_edge(1).is_err());
+    }
+
+    #[test]
+    fn reorder_fanins_test() {
+        let i1 = wrap(AigNode::Input(1));
+        let i2 = wrap(AigNode::Input(2));
+        let a5 = wrap(AigNode::and(5, edge(i1.clone()), edge(i2.clone())));
+        let l3 = wrap(AigNode::latch(3, edge(a5.clone()), None));
+        let a6 = wrap(AigNode::and(6, edge(a5.clone()), edge(l3.clone())));
+        let a7 = wrap(AigNode::and(7, edge(a5.clone()), edge(a6.clone())));
+
+        // Copy that we are not going to modify
+        let b1 = wrap(AigNode::Input(1));
+        let b2 = wrap(AigNode::Input(2));
+        let b5 = wrap(AigNode::and(5, edge(b1.clone()), edge(b2.clone())));
+        let b3 = wrap(AigNode::latch(3, edge(b5.clone()), None));
+        let b6 = wrap(AigNode::and(6, edge(b5.clone()), edge(b3.clone())));
+
+        // Fanins swapped
+        a7.borrow_mut().reorder_fanins();
+        assert_eq!(
+            a7,
+            wrap(AigNode::and(7, edge(b6.clone()), edge(b5.clone())))
+        );
+
+        // Fanins not swapped
+        a6.borrow_mut().reorder_fanins();
+        assert_eq!(a6, b6);
+
+        // Fanins swapped
+        a5.borrow_mut().reorder_fanins();
+        assert_eq!(
+            a5,
+            wrap(AigNode::and(5, edge(b2.clone()), edge(b1.clone())))
+        );
     }
 }
