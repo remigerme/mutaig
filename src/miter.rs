@@ -299,11 +299,6 @@ impl Miter {
     ) -> Result<Cnf> {
         let mut cnf = Cnf::new();
 
-        println!(
-            "EXTRACTING CNF FROM {}({}) AND {}({})",
-            node_a, compl_a, node_b, compl_b
-        );
-
         // Generating clauses from a
         let mut done_a = HashSet::new();
         self.extract_cnf_from(
