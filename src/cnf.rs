@@ -63,6 +63,12 @@ impl TryFrom<NodeId> for Lit {
     }
 }
 
+impl Lit {
+    pub fn get_idx(&self) -> i64 {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LitRes {
     False,
@@ -96,6 +102,14 @@ impl Clause {
     /// A new empty clause.
     pub fn new() -> Self {
         Clause(Vec::new())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn get_lits(&self) -> Vec<Lit> {
+        self.0.clone()
     }
 
     /// Returns the true SAT clause once we got rid of `True` and `False` literals.
@@ -142,6 +156,14 @@ impl Cnf {
     /// A new empty CNF.
     pub fn new() -> Self {
         Cnf(Vec::new())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn get_clauses(&self) -> Vec<Clause> {
+        self.0.clone()
     }
 
     /// Add the given clause to the CNF.
