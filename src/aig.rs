@@ -284,11 +284,11 @@ impl Aig {
                         fanin0
                             .get_node()
                             .borrow_mut()
-                            .add_fanout(id, Rc::downgrade(&n))?;
+                            .add_fanout(id, Rc::downgrade(&n));
                         fanin1
                             .get_node()
                             .borrow_mut()
-                            .add_fanout(id, Rc::downgrade(&n))?;
+                            .add_fanout(id, Rc::downgrade(&n));
                     }
                     _ => (),
                 };
@@ -384,17 +384,54 @@ impl Aig {
         assert!(old.borrow().is_and());
 
         if new.borrow().is_and() {
+            // Checking that new node is used by someone else, because
+            // we are going to create a "copy" of the new node into the old node,
+            // which would break fanouts of new node if any
+            if new.borrow().get_and_fanouts().unwrap().len() > 0 {
+                panic!("replacing by a node already in use: not supported for now");
+            }
+
             let fanins = new.borrow().get_fanins();
 
             let weak_old = Rc::downgrade(&old);
 
+            // There is a possibility for a subtle bug to occur here (which occured before this fix).
+            // Considering the following situation :
+            //   B   D
+            //  / \ / \
+            // A   C   E
+            // If you replace B by D, then C will have some wrong fanouts ("B replaced by D" won't be part of it).
+            // Indeed, the fanouts operations are :
+            // - replace fanin0:
+            //   - B is removed from A
+            //   - B is added to C
+            // - replace fanin1:
+            //   - B is removed from C
+            //   - B is added to E
+            // When you want to set_id of B, the fanouts of C are in an incorrect state.
+            // Note that these situations do not cause any issue :
+            //   B       D    |    B       D    |    B       D    |
+            //  / \     / \   |   / \     / \   |   / \     / \   |
+            // C   A   C   E  |  C   A   E   C  |  A   C   E   C  |
+            // Time lost on this issue : 5h.
+            let old_f1_node = old.borrow().get_fanins()[1].get_node();
+
             old.borrow_mut()
                 .set_fanin(&fanins[0], FaninId::Fanin0, weak_old.clone())?;
             old.borrow_mut()
-                .set_fanin(&fanins[1], FaninId::Fanin1, weak_old)?;
+                .set_fanin(&fanins[1], FaninId::Fanin1, weak_old.clone())?;
+
+            // Checking for the issue mentioned above
+            if old_f1_node == fanins[0].get_node() {
+                fanins[0]
+                    .get_node()
+                    .borrow_mut()
+                    .add_fanout(old_id, weak_old);
+            }
+
             old.borrow_mut().set_id(id)?;
         } else if new.borrow().is_false() || new.borrow().is_input() {
-            old.borrow_mut().set_id(id)?;
+            panic!("replacing by a constant node or an input: unsupported feature for now");
         } else {
             panic!("replacing by a latch: unsupported feature for now");
         }

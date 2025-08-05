@@ -158,13 +158,12 @@ impl AigNode {
     /// by borrowing doesn't work : we are not allowed to borrow!
     /// So we need to supply the id of the fanout to store and be able to identify the fanout,
     /// without borrowing the `AigNodeRef`.
-    pub(super) fn add_fanout(&mut self, fanout_id: NodeId, fanout: AigNodeWeak) -> Result<()> {
+    pub(super) fn add_fanout(&mut self, fanout_id: NodeId, fanout: AigNodeWeak) {
         match self {
             AigNode::And { fanouts, .. } => {
                 fanouts.insert(fanout_id, fanout);
-                Ok(())
             }
-            _ => Ok(()),
+            _ => (),
         }
     }
 
@@ -271,7 +270,7 @@ impl AigNode {
                 fanin0
                     .get_node()
                     .borrow_mut()
-                    .add_fanout(self_id, self_weak)?;
+                    .add_fanout(self_id, self_weak);
                 Ok(())
             }
             (AigNode::And { fanin1, .. }, FaninId::Fanin1) => {
@@ -280,7 +279,7 @@ impl AigNode {
                 fanin1
                     .get_node()
                     .borrow_mut()
-                    .add_fanout(self_id, self_weak)?;
+                    .add_fanout(self_id, self_weak);
                 Ok(())
             }
             (AigNode::Latch { next, .. }, FaninId::Fanin0) => Ok(*next = fanin.clone()),
