@@ -560,6 +560,31 @@ impl Aig {
         }
         self.nodes = new_nodes_map;
 
+        // Reconstructing fanouts
+        // This is needed because the loop above might destroy proper fanouts
+        // Let's consider the situation
+        // A   B
+        //  \ /
+        //   C
+        // where id of A is going to be set to id of B and assuming A is first in topological order
+        // when id of A is set to id(B), the fanout from C to A is updated
+        // but during the update it replaces the fanout from C to B, overwriting it
+        // and then when id of B is rewritten to something else, the fanout from C to A
+        // is again rewritten to fanout from C to B. It basically destroys everything.
+        for (&id, weak) in &self.nodes {
+            let node = weak.upgrade().unwrap();
+            match node.borrow().deref() {
+                AigNode::False | AigNode::Input(_) => (),
+                AigNode::Latch { next, .. } => {
+                    next.get_node().borrow_mut().add_fanout(id, weak.clone())
+                }
+                AigNode::And { fanin0, fanin1, .. } => {
+                    fanin0.get_node().borrow_mut().add_fanout(id, weak.clone());
+                    fanin1.get_node().borrow_mut().add_fanout(id, weak.clone());
+                }
+            }
+        }
+
         self.check_integrity()
     }
 
