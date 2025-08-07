@@ -470,30 +470,36 @@ impl Aig {
         &self,
         node: AigNodeRef,
         new_nodes: &mut Vec<AigNodeRef>,
-        seen: &mut HashSet<NodeId>,
+        done: &mut HashSet<NodeId>,
     ) -> Result<()> {
-        let mut stack: Vec<AigNodeRef> = Vec::new();
-        stack.push(node);
+        let mut stack: Vec<(AigNodeRef, bool)> = Vec::new();
+        stack.push((node, false));
 
-        while let Some(node) = stack.pop() {
+        while let Some((node, last_time)) = stack.pop() {
             let id = node.borrow().get_id();
 
-            if seen.contains(&id) {
-                return Ok(());
+            // Post order check
+            if last_time {
+                done.insert(id);
+                if node.borrow().is_and() {
+                    new_nodes.push(node);
+                }
+                continue;
             }
-            seen.insert(id);
+
+            if done.contains(&id) {
+                continue;
+            }
+
+            stack.push((node.clone(), true));
 
             let mut fanins = node.borrow().get_fanins();
             fanins.sort_unstable_by_key(|fanin| fanin.get_node().borrow().get_id());
 
             for fanin in fanins {
-                if !seen.contains(&fanin.get_node().borrow().get_id()) {
-                    stack.push(fanin.get_node());
+                if !done.contains(&fanin.get_node().borrow().get_id()) {
+                    stack.push((fanin.get_node(), false));
                 }
-            }
-
-            if node.borrow().is_and() {
-                new_nodes.push(node);
             }
         }
 
@@ -544,7 +550,6 @@ impl Aig {
         while let Some(node) = outputs_to_visit.pop() {
             self.minimize_ids_visit(node, &mut new_nodes, &mut seen)?;
         }
-        new_nodes.reverse();
 
         // Updating ids and map
         // Also making sure fanins are correctly ordered (fanin0 >= fanin1)
@@ -617,10 +622,14 @@ impl Aig {
 
         // Checking that all outputs are registered as nodes
         for output in &self.outputs {
-            if self.get_node(output.node.borrow().get_id()).is_none() {
-                return Err(AigError::InvalidState(
-                    "output is not a node of the aig".to_string(),
-                ));
+            let output_id = output.get_node().borrow().get_id();
+            if self.get_node(output_id).is_none() {
+                return Err(AigError::InvalidState(format!(
+                    "output ({}, {}) refers to node {} which is not in the aig",
+                    output_id,
+                    output.get_complement(),
+                    output_id
+                )));
             }
         }
 
@@ -1045,7 +1054,7 @@ mod test {
     fn minimize_ids_test() {
         let mut a = Aig::new();
         let i1 = a.add_node(AigNode::Input(1)).unwrap();
-        let _i2 = a.add_node(AigNode::Input(2)).unwrap(); // not used to check if kept alive
+        a.add_node(AigNode::Input(2)).unwrap(); // not used to check if kept alive
         let l3 = a
             .add_node(AigNode::latch(3, AigEdge::new(i1.clone(), true), None))
             .unwrap();
@@ -1068,7 +1077,7 @@ mod test {
 
         let mut b = Aig::new();
         let b1 = b.add_node(AigNode::Input(1)).unwrap();
-        let _b2 = b.add_node(AigNode::Input(2)).unwrap(); // not used to check if kept alive
+        b.add_node(AigNode::Input(2)).unwrap(); // not used to check if kept alive
         let b3 = b
             .add_node(AigNode::latch(3, AigEdge::new(b1.clone(), true), None))
             .unwrap();
