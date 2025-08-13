@@ -152,6 +152,13 @@ impl AigNode {
         }
     }
 
+    pub(super) fn clear_fanouts(&mut self) {
+        match self {
+            AigNode::And { fanouts, .. } => fanouts.clear(),
+            _ => (),
+        }
+    }
+
     /// Okay, what is going on here is a bit subtle.
     /// The core problem is that in practice, the `fanout` is mutably owned by the caller.
     /// The first approach of taking an `AigNodeRef` as an argument, and computing the `NodeId`
@@ -294,11 +301,11 @@ impl AigNode {
                 id, fanin0, fanin1, ..
             } => {
                 let mut found = false;
-                if fanin0.get_node().borrow().get_id() == child_id {
+                if fanin0.get_node_id() == child_id {
                     found = true;
                     fanin0.complement = !fanin0.complement;
                 }
-                if fanin1.get_node().borrow().get_id() == child_id {
+                if fanin1.get_node_id() == child_id {
                     found = true;
                     fanin1.complement = !fanin1.complement;
                 }
@@ -312,7 +319,7 @@ impl AigNode {
                 }
             }
             AigNode::Latch { id, next, .. } => {
-                if next.get_node().borrow().get_id() == child_id {
+                if next.get_node_id() == child_id {
                     next.complement = !next.complement;
                     Ok(())
                 } else {
@@ -338,8 +345,8 @@ impl AigNode {
     pub(super) fn reorder_fanins(&mut self) {
         match self {
             AigNode::And { fanin0, fanin1, .. } => {
-                let id0 = fanin0.get_node().borrow().get_id();
-                let id1 = fanin1.get_node().borrow().get_id();
+                let id0 = fanin0.get_node_id();
+                let id1 = fanin1.get_node_id();
                 if id0 < id1 {
                     swap(fanin0, fanin1);
                 }
