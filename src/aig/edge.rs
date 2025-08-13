@@ -4,6 +4,8 @@
 
 use std::ops::Not;
 
+use crate::NodeId;
+
 use super::AigNodeRef;
 
 /// Unambiguous fanin selector.
@@ -19,6 +21,18 @@ impl From<bool> for FaninId {
             FaninId::Fanin1
         } else {
             FaninId::Fanin0
+        }
+    }
+}
+
+impl From<usize> for FaninId {
+    fn from(value: usize) -> Self {
+        if value == 0 {
+            FaninId::Fanin0
+        } else if value == 1 {
+            FaninId::Fanin1
+        } else {
+            panic!("could not create FaninId from value={}", value)
         }
     }
 }
@@ -69,6 +83,10 @@ impl AigEdge {
 
     pub fn get_node(&self) -> AigNodeRef {
         self.node.clone()
+    }
+
+    pub fn get_node_id(&self) -> NodeId {
+        self.node.borrow().get_id()
     }
 
     pub fn get_complement(&self) -> bool {

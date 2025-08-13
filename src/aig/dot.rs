@@ -13,7 +13,7 @@
 //!     .get_outputs()
 //!     .iter()
 //!     .map(|edge| {
-//!         let id = edge.get_node().borrow().get_id();
+//!         let id = edge.get_node_id();
 //!         let b = edge.get_complement();
 //!         ((id, b), (id, b))
 //!     })
@@ -217,11 +217,7 @@ impl AigEdge {
 }
 
 fn get_output_id(output: &AigEdge) -> String {
-    format!(
-        "o{}{}",
-        output.get_node().borrow().get_id(),
-        output.get_complement()
-    )
+    format!("o{}{}", output.get_node_id(), output.get_complement())
 }
 
 fn get_xor_id(ia: NodeId, ca: bool, ib: NodeId, cb: bool) -> String {
@@ -521,7 +517,7 @@ mod test {
             .get_outputs()
             .iter()
             .map(|edge| {
-                let id = edge.get_node().borrow().get_id();
+                let id = edge.get_node_id();
                 let b = edge.get_complement();
                 ((id, b), (id, b))
             })

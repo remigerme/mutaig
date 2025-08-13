@@ -158,9 +158,9 @@ let optimized = Aig::from_file("optimized.aag").unwrap();
 // So we need to tell the miter which outputs of the reference
 // correspond to which outputs of the optimized version.
 let output_a = reference.get_outputs()[0];
-let id_a = output_a.get_node().borrow().get_id();
+let id_a = output_a.get_node_id();
 let output_b = optimized.get_outputs()[0];
-let id_b = output_b.get_node().borrow().get_id();
+let id_b = output_b.get_node_id();
 let outputs_mapping = HashMap::new();
 outputs_mapping.insert((id_a, output_a.get_complement()), (id_b, output_b.get_complement()));
 
@@ -201,7 +201,7 @@ let outputs_map = aig
     .get_outputs()
     .iter()
     .map(|edge| {
-        let id = edge.get_node().borrow().get_id();
+        let id = edge.get_node_id();
         let b = edge.get_complement();
         ((id, b), (id, b))
     })

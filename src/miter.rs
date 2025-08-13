@@ -113,7 +113,7 @@ fn check_outputs(
     // Checking outputs of a are registered
     if a.get_outputs()
         .iter()
-        .map(|output| (output.get_node().borrow().get_id(), output.get_complement()))
+        .map(|output| (output.get_node_id(), output.get_complement()))
         .collect::<HashSet<(u64, bool)>>()
         != outputs_map.keys().copied().collect()
     {
@@ -123,7 +123,7 @@ fn check_outputs(
     // Checking outputs of b are registered
     if b.get_outputs()
         .iter()
-        .map(|output| (output.get_node().borrow().get_id(), output.get_complement()))
+        .map(|output| (output.get_node_id(), output.get_complement()))
         .collect::<HashSet<(u64, bool)>>()
         != outputs_map.values().copied().collect()
     {
@@ -269,7 +269,7 @@ impl Miter {
                 // Interested in and gates only
                 AigNode::And { fanin0, fanin1, .. } => {
                     for fanin in [fanin0, fanin1] {
-                        let fanin_id = fanin.get_node().borrow().get_id();
+                        let fanin_id = fanin.get_node_id();
                         // Has the node been already handled?
                         if !done.contains(&fanin_id) {
                             stack.push(fanin.get_node());
@@ -481,13 +481,13 @@ impl Miter {
                     ..
                 },
             ) => {
-                let id0a = fanin0_a.get_node().borrow().get_id();
+                let id0a = fanin0_a.get_node_id();
                 let c0a = fanin0_a.get_complement();
-                let id1a = fanin1_a.get_node().borrow().get_id();
+                let id1a = fanin1_a.get_node_id();
                 let c1a = fanin1_a.get_complement();
-                let id0b = fanin0_b.get_node().borrow().get_id();
+                let id0b = fanin0_b.get_node_id();
                 let c0b = fanin0_b.get_complement();
-                let id1b = fanin1_b.get_node().borrow().get_id();
+                let id1b = fanin1_b.get_node_id();
                 let c1b = fanin1_b.get_complement();
 
                 // We expect the boolean functions to be the same:
@@ -516,7 +516,7 @@ impl Miter {
     /// For now, consider only real outputs and not pseudo outputs induced by latches. TODO?
     pub fn are_outputs_merged(&self) -> bool {
         for out in self.a.get_outputs() {
-            if !self.merged_a.contains(&out.get_node().borrow().get_id()) {
+            if !self.merged_a.contains(&out.get_node_id()) {
                 return false;
             }
         }

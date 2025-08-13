@@ -73,8 +73,8 @@
 //!     .iter()
 //!     .map(|fanin| {
 //!        (
-//!            (fanin.get_node().borrow().get_id(), fanin.get_complement()),
-//!            (fanin.get_node().borrow().get_id(), fanin.get_complement()),
+//!            (fanin.get_node_id(), fanin.get_complement()),
+//!            (fanin.get_node_id(), fanin.get_complement()),
 //!        )
 //!     })
 //!     .collect::<HashMap<(NodeId, bool), (NodeId, bool)>>();
@@ -124,7 +124,7 @@
 //!     .get_outputs()
 //!     .iter()
 //!     .map(|edge| {
-//!         let id = edge.get_node().borrow().get_id();
+//!         let id = edge.get_node_id();
 //!         let b = edge.get_complement();
 //!         ((id, b), (id, b))
 //!     })

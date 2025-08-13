@@ -82,8 +82,8 @@ impl Aig {
             let id = 1 + i + l + k;
             let n = self.get_node(id).unwrap();
             let fanins = n.borrow().get_fanins();
-            let i0 = fanins[0].get_node().borrow().get_id();
-            let i1 = fanins[1].get_node().borrow().get_id();
+            let i0 = fanins[0].get_node_id();
+            let i1 = fanins[1].get_node_id();
 
             if id <= i0 {
                 return Err(AigError::InvalidState(format!(
@@ -120,7 +120,7 @@ impl Aig {
 
         // Checking that all outputs are registered as nodes
         for output in &self.outputs {
-            let output_id = output.get_node().borrow().get_id();
+            let output_id = output.get_node_id();
             if self.get_node(output_id).is_none() {
                 return Err(AigError::InvalidState(format!(
                     "output ({}, {}) refers to node {} which is not in the aig",

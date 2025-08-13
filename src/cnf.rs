@@ -304,7 +304,7 @@ impl AigEdge {
         let lit = if *self.get_node().borrow() == AigNode::False {
             LitRes::False
         } else {
-            let id = self.get_node().borrow().get_id();
+            let id = self.get_node_id();
             LitRes::from(*litmap.get(&id).ok_or(MiterError::UnmappedNodeToLit(id))?)
         };
         Ok(if self.get_complement() { !lit } else { lit })

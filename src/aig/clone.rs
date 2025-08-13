@@ -50,12 +50,12 @@ impl Aig {
             } = node.borrow().deref()
             {
                 // Beware, we also must recreate the corresponding fanins
-                let i0 = fanin0.get_node().borrow().get_id();
+                let i0 = fanin0.get_node_id();
                 let new_fanin0 = AigEdge::new(
                     aig.get_node(i0).ok_or(AigError::NodeDoesNotExist(i0))?,
                     fanin0.get_complement(),
                 );
-                let i1 = fanin1.get_node().borrow().get_id();
+                let i1 = fanin1.get_node_id();
                 let new_fanin1 = AigEdge::new(
                     aig.get_node(i1).ok_or(AigError::NodeDoesNotExist(i1))?,
                     fanin1.get_complement(),
@@ -72,7 +72,7 @@ impl Aig {
                 aig.replace_fanin(
                     id,
                     crate::FaninId::Fanin0,
-                    next.get_node().borrow().get_id(),
+                    next.get_node_id(),
                     next.complement,
                 )?;
             } else {
@@ -82,7 +82,7 @@ impl Aig {
 
         // Mark outputs
         for output in self.get_outputs() {
-            aig.add_output(output.get_node().borrow().get_id(), output.complement)?;
+            aig.add_output(output.get_node_id(), output.complement)?;
         }
 
         aig.update();
