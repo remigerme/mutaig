@@ -15,7 +15,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     ops::Deref,
-    rc::Rc,
+    rc::{Rc, Weak},
 };
 
 pub use edge::{AigEdge, FaninId};
@@ -149,14 +149,14 @@ impl Aig {
                 // For latches, we don't want to detect "cycles" so we add their fanins
                 // to the list of outputs to visit for later.
                 AigNode::Latch { next, .. } => {
-                    if !done.contains(&next.get_node().borrow().get_id()) {
+                    if !done.contains(&next.get_node_id()) {
                         outputs_to_visit.push(next.get_node());
                     }
                 }
                 // For and gates, we simply keep going on the DFS.
                 AigNode::And { fanin0, fanin1, .. } => {
                     for fanin in [fanin0, fanin1] {
-                        if !done.contains(&fanin.get_node().borrow().get_id()) {
+                        if !done.contains(&fanin.get_node_id()) {
                             stack.push((fanin.get_node(), false));
                         }
                     }
@@ -374,7 +374,7 @@ impl Aig {
 
         let new = self
             .nodes
-            .remove(&id)
+            .get(&id)
             .ok_or(AigError::NodeDoesNotExist(id))?
             .upgrade()
             .ok_or(AigError::InvalidState(format!(
@@ -384,85 +384,40 @@ impl Aig {
 
         assert!(old.borrow().is_and());
 
-        if new.borrow().is_and() {
-            // Checking that new node is used by someone else, because
-            // we are going to create a "copy" of the new node into the old node,
-            // which would break fanouts of new node if any
-            if new.borrow().get_and_fanouts().unwrap().len() > 0 {
-                panic!("replacing by a node already in use: not supported for now");
-            }
+        let fanouts: Vec<AigNodeRef> = old
+            .borrow()
+            .get_and_fanouts()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, fanout_weak)| fanout_weak.upgrade())
+            .collect();
 
-            let fanins = new.borrow().get_fanins();
+        for fanout in fanouts {
+            let fanout_weak = Rc::downgrade(&fanout);
+            let fanins_of_fanout = fanout.borrow().get_fanins();
 
-            let weak_old = Rc::downgrade(&old);
-
-            // There is a possibility for a subtle bug to occur here (which occured before this fix).
-            // Considering the following situation :
-            //   B   D
-            //  / \ / \
-            // A   C   E
-            // If you replace B by D, then C will have some wrong fanouts ("B replaced by D" won't be part of it).
-            // Indeed, the fanouts operations are :
-            // - replace fanin0:
-            //   - B is removed from A
-            //   - B is added to C
-            // - replace fanin1:
-            //   - B is removed from C
-            //   - B is added to E
-            // When you want to set_id of B, the fanouts of C are in an incorrect state.
-            // Note that these situations do not cause any issue :
-            //   B       D    |    B       D    |    B       D    |
-            //  / \     / \   |   / \     / \   |   / \     / \   |
-            // C   A   C   E  |  C   A   E   C  |  A   C   E   C  |
-            // Time lost on this issue : 5h.
-            let old_f1_node = old.borrow().get_fanins()[1].get_node();
-
-            old.borrow_mut()
-                .set_fanin(&fanins[0], FaninId::Fanin0, weak_old.clone())?;
-            old.borrow_mut()
-                .set_fanin(&fanins[1], FaninId::Fanin1, weak_old.clone())?;
-
-            // Checking for the issue mentioned above
-            if old_f1_node == fanins[0].get_node() {
-                fanins[0]
-                    .get_node()
-                    .borrow_mut()
-                    .add_fanout(old_id, weak_old);
-            }
-
-            old.borrow_mut().set_id(id)?;
-        } else if new.borrow().is_false() || new.borrow().is_input() {
-            panic!("replacing by a constant node or an input: unsupported feature for now");
-        } else {
-            panic!("replacing by a latch: unsupported feature for now");
-        }
-
-        // Keeping the map updated
-        self.nodes.insert(id, Rc::downgrade(&old));
-
-        // If complement (ie the new node is the negation of the old one), we need to update its fanout
-        // (potentially including outputs)
-        if complement {
-            let fanouts: Vec<AigNodeRef> = old
-                .borrow()
-                .get_and_fanouts()
-                .unwrap() // unwrap cause old is supposed to be an and gate and have fanouts
-                .iter()
-                .filter_map(|(_, weak)| weak.upgrade())
-                .collect();
-
-            for fanout in fanouts {
-                fanout.borrow_mut().invert_edge(id)?;
-            }
-
-            // Also, this node might be an output node ie have no fanout but still have an edge going out.
-            for output in &mut self.outputs {
-                let output_id = output.get_node().borrow().get_id();
-                if output_id == id {
-                    output.complement = !output.complement;
+            let mut fanin_id = 0;
+            for fanin_of_fanout in fanins_of_fanout {
+                if fanin_of_fanout.get_node_id() == old_id {
+                    let old_compl = fanin_of_fanout.get_complement();
+                    let new_fanin = AigEdge::new(new.clone(), old_compl ^ complement);
+                    fanout.borrow_mut().set_fanin(
+                        &new_fanin,
+                        FaninId::from(fanin_id),
+                        fanout_weak.clone(),
+                    )?;
                 }
+                fanin_id += 1;
             }
         }
+        for output in &mut self.outputs {
+            if output.get_node_id() == old_id {
+                output.node = new.clone();
+                output.complement = output.complement ^ complement;
+            }
+        }
+
+        old.borrow_mut().clear_fanouts();
 
         Ok(())
     }
@@ -495,10 +450,10 @@ impl Aig {
             stack.push((node.clone(), true));
 
             let mut fanins = node.borrow().get_fanins();
-            fanins.sort_unstable_by_key(|fanin| fanin.get_node().borrow().get_id());
+            fanins.sort_unstable_by_key(|fanin| fanin.get_node_id());
 
             for fanin in fanins {
-                if !done.contains(&fanin.get_node().borrow().get_id()) {
+                if !done.contains(&fanin.get_node_id()) {
                     stack.push((fanin.get_node(), false));
                 }
             }
