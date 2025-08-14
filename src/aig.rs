@@ -15,7 +15,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     ops::Deref,
-    rc::{Rc, Weak},
+    rc::Rc,
 };
 
 pub use edge::{AigEdge, FaninId};
@@ -821,7 +821,7 @@ mod test {
     }
 
     #[test]
-    fn aig_neq_test() {
+    fn aig_eq_commuted_fanins() {
         let mut a = Aig::new();
         let mut b = Aig::new();
 
@@ -850,21 +850,98 @@ mod test {
             ))
             .unwrap();
 
-        assert_ne!(a, b);
+        // Order of fanins are not relevant
+        assert_eq!(a, b);
+    }
 
-        let mut c = Aig::new();
-        let mut d = Aig::new();
+    #[test]
+    fn aig_neq_test() {
+        // Complemented outputs
+        let mut a1 = Aig::new();
+        let mut a2 = Aig::new();
+        a1.add_node(AigNode::Input(1)).unwrap();
+        a2.add_node(AigNode::Input(1)).unwrap();
+        a1.add_output(1, false).unwrap();
+        a2.add_output(1, true).unwrap();
+        assert_ne!(a1, a2);
 
-        let cf = c.add_node(AigNode::False).unwrap();
-        let df = d.add_node(AigNode::False).unwrap();
-        c.add_node(AigNode::latch(1, AigEdge::new(cf.clone(), false), None))
+        // Different number of outputs
+        let mut a3 = Aig::new();
+        let mut a4 = Aig::new();
+        a3.add_node(AigNode::Input(1)).unwrap();
+        a3.add_node(AigNode::Input(2)).unwrap();
+        a4.add_node(AigNode::Input(1)).unwrap();
+        a4.add_node(AigNode::Input(2)).unwrap();
+        a3.add_output(1, false).unwrap();
+        a4.add_output(1, false).unwrap();
+        a4.add_output(2, false).unwrap();
+        assert_ne!(a3, a4);
+
+        // Different inputs
+        let mut a5 = Aig::new();
+        let mut a6 = Aig::new();
+        a5.add_node(AigNode::Input(1)).unwrap();
+        a6.add_node(AigNode::Input(2)).unwrap(); // Different input id
+        assert_ne!(a5, a6);
+
+        // Different latches
+        let mut a7 = Aig::new();
+        let mut a8 = Aig::new();
+        let i1_a7 = a7.add_node(AigNode::Input(1)).unwrap();
+        let i1_a8 = a8.add_node(AigNode::Input(1)).unwrap();
+        a7.add_node(AigNode::latch(2, AigEdge::new(i1_a7.clone(), false), None))
             .unwrap();
-        d.add_node(AigNode::latch(
-            1,
-            AigEdge::new(df.clone(), false),
-            Some(false),
+        a8.add_node(AigNode::latch(2, AigEdge::new(i1_a8.clone(), true), None))
+            .unwrap();
+        assert_ne!(a7, a8);
+
+        // Different AND gates
+        let mut a9 = Aig::new();
+        let mut a10 = Aig::new();
+        let i1_a9 = a9.add_node(AigNode::Input(1)).unwrap();
+        let i2_a9 = a9.add_node(AigNode::Input(2)).unwrap();
+        let i1_a10 = a10.add_node(AigNode::Input(1)).unwrap();
+        let i2_a10 = a10.add_node(AigNode::Input(2)).unwrap();
+        a9.add_node(AigNode::and(
+            3,
+            AigEdge::new(i1_a9.clone(), false),
+            AigEdge::new(i2_a9.clone(), false),
         ))
         .unwrap();
+        a10.add_node(AigNode::and(
+            3,
+            AigEdge::new(i1_a10.clone(), true),
+            AigEdge::new(i2_a10.clone(), false),
+        ))
+        .unwrap(); // Different complement on fanin0
+        a9.add_output(3, false).unwrap();
+        a10.add_output(3, false).unwrap();
+        assert_ne!(a9, a10);
+
+        // Missing nodes after update
+        let mut a11 = Aig::new();
+        let mut a12 = Aig::new();
+        let i1_a11 = a11.add_node(AigNode::Input(1)).unwrap();
+        let i1_a12 = a12.add_node(AigNode::Input(1)).unwrap();
+        let _and_a11 = a11
+            .add_node(AigNode::and(
+                2,
+                AigEdge::new(i1_a11.clone(), false),
+                AigEdge::new(i1_a11.clone(), false),
+            ))
+            .unwrap();
+        let _and_a12 = a12
+            .add_node(AigNode::and(
+                2,
+                AigEdge::new(i1_a12.clone(), false),
+                AigEdge::new(i1_a12.clone(), false),
+            ))
+            .unwrap();
+        a11.add_output(2, false).unwrap();
+        // a12 doesn't use the AND gate as output, so it will be removed after update
+        a11.update();
+        a12.update();
+        assert_ne!(a11, a12);
     }
 
     #[test]

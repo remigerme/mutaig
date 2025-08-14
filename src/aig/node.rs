@@ -52,8 +52,10 @@ pub type AigNodeRef = Rc<RefCell<AigNode>>;
 pub(crate) type AigNodeWeak = Weak<RefCell<AigNode>>;
 
 impl PartialEq for AigNode {
-    /// We just compare each field one by one, except [`AigNode::And::fanouts`].
-    /// This is the equality which would have been derived if this field did not exist.
+    /// Equalities for [`AigNode::False`], [`AigNode::Input`], and [`AigNode::Latch`] are straightforward.
+    /// For [`AigNode::And`]:
+    /// - order of fanins is not relevant
+    /// - [`AigNode::And::fanouts`] is not taken into account.
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (AigNode::False, AigNode::False) => true,
@@ -83,7 +85,11 @@ impl PartialEq for AigNode {
                     fanin1: fanin12,
                     ..
                 },
-            ) => id1 == id2 && fanin01 == fanin02 && fanin11 == fanin12,
+            ) => {
+                id1 == id2
+                    && ((fanin01 == fanin02 && fanin11 == fanin12)
+                        || (fanin01 == fanin12 && fanin11 == fanin02))
+            }
             (_, _) => false,
         }
     }
@@ -401,8 +407,8 @@ mod test {
             a2,
             wrap(AigNode::and(2, edge(nf.clone()), edge(i1.clone()),))
         );
-        // Fanins do not commute
-        assert_ne!(
+        // Fanins do commute
+        assert_eq!(
             a2,
             wrap(AigNode::and(2, edge(i1.clone()), edge(nf.clone()),))
         );
