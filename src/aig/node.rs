@@ -150,6 +150,24 @@ impl AigNode {
         }
     }
 
+    pub(super) fn strashable(&self, other: &AigNode) -> bool {
+        match (self, other) {
+            (
+                AigNode::And {
+                    fanin0: f0,
+                    fanin1: f1,
+                    ..
+                },
+                AigNode::And {
+                    fanin0: g0,
+                    fanin1: g1,
+                    ..
+                },
+            ) => f0 == g0 && f1 == g1,
+            (_, _) => false,
+        }
+    }
+
     /// Returns fanouts as a hashmap if the node is an and gate, else returns [`None`].
     pub fn get_and_fanouts(&self) -> Option<HashMap<NodeId, AigNodeWeak>> {
         match self {

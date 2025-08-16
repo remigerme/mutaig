@@ -56,6 +56,28 @@ pub struct Aig {
     keep_nodes_alive: Vec<AigNodeRef>,
     // Keep alive node false.
     _node_false: AigNodeRef,
+
+    /// Strashing
+    /// ---------
+    /// For more information on strashing, check "Robust boolean reasoning for equivalence checking" by Kuehlmann et al.
+    ///
+    /// This map allows for strashing. Moreover, we still need to be able to refer to nodes
+    /// that might have not been instantiated because of strashing. For example:
+    ///
+    /// Current AIG  | Node to add  
+    ///     3        |      4
+    ///    / \       |     / \
+    ///   1   2      |    2   1
+    ///
+    /// We are not going to create a new node. Instead, we just want to create a link from id 4 to node 3.
+    /// This is done using [`Aig::strash_repr`].
+    ///
+    /// Technical details:
+    /// - [`AigEdge`] are not used directly to not keep nodes alive artificially
+    /// - whenever a node is updated, [`Aig::strash_map`] must be updated accordingly
+    /// - the same goes for [`Aig::strash_repr`].
+    strash_map: HashMap<((NodeId, bool), (NodeId, bool)), AigNodeWeak>,
+    strash_repr: HashMap<NodeId, AigNodeWeak>,
 }
 
 impl Aig {
@@ -70,12 +92,21 @@ impl Aig {
             outputs: Vec::new(),
             keep_nodes_alive: Vec::new(),
             _node_false: node_false,
+            strash_map: HashMap::new(),
+            strash_repr: HashMap::new(),
         }
     }
 
     /// Retrieves a node from its id.
+    ///
+    /// The returned node might have a different id, this is because of strashing.
+    /// For more information, check internal docs of [`Aig`].
     pub fn get_node(&self, id: NodeId) -> Option<AigNodeRef> {
-        self.nodes.get(&id)?.upgrade()
+        if let Some(node) = self.strash_repr.get(&id) {
+            node.upgrade()
+        } else {
+            self.nodes.get(&id)?.upgrade()
+        }
     }
 
     /// Call this function when you are done with your rewrite.
@@ -87,6 +118,8 @@ impl Aig {
         // Removing no longer valid entries from the nodes
         self.nodes
             .retain(|_, weak_node| weak_node.upgrade().is_some());
+        self.strash_map.retain(|_, weak| weak.upgrade().is_some());
+        self.strash_repr.retain(|_, weak| weak.upgrade().is_some());
     }
 
     /// Retrieves inputs reference.
@@ -204,11 +237,11 @@ impl Aig {
                 if *id == 0 {
                     Err(AigError::IdZeroButNotFalse)
                 } else {
-                    let fanin0_id = fanin0.node.borrow().get_id();
-                    let fanin1_id = fanin1.node.borrow().get_id();
-                    if !self.nodes.contains_key(&fanin0_id) {
+                    let fanin0_id = fanin0.get_node_id();
+                    let fanin1_id = fanin1.get_node_id();
+                    if self.get_node(fanin0_id).is_none() {
                         Err(AigError::NodeDoesNotExist(fanin0_id))
-                    } else if !self.nodes.contains_key(&fanin1_id) {
+                    } else if self.get_node(fanin1_id).is_none() {
                         Err(AigError::NodeDoesNotExist(fanin1_id))
                     } else {
                         Ok(())
@@ -219,8 +252,8 @@ impl Aig {
                 if *id == 0 {
                     Err(AigError::IdZeroButNotFalse)
                 } else {
-                    let next_id = next.node.borrow().get_id();
-                    if !self.nodes.contains_key(&next_id) {
+                    let next_id = next.get_node_id();
+                    if self.get_node(next_id).is_none() {
                         Err(AigError::NodeDoesNotExist(next_id))
                     } else {
                         Ok(())
@@ -267,21 +300,61 @@ impl Aig {
 
         let id = node.get_id();
         match self.get_node(id) {
-            // No node with this id, let's create a new one
+            // We're adding a node not existing yet, let's create a new
+            // apart from AND gates that might get strashed.
             None => {
-                let n: Rc<RefCell<AigNode>> = Rc::new(RefCell::new(node));
-                self.nodes.insert(id, Rc::downgrade(&n));
-                self.keep_nodes_alive.push(n.clone());
-                // If the node is an input or a latch, we must add it to the map
-                // If the node is an and gate, we must register it as a fanout
-                match n.borrow().deref() {
-                    AigNode::Input(_) => {
-                        self.inputs.insert(id, n.clone());
-                    }
-                    AigNode::Latch { .. } => {
-                        self.latches.insert(id, n.clone());
-                    }
+                let n = Rc::new(RefCell::new(node));
+                let real_n = match n.clone().borrow().deref() {
+                    AigNode::False => n,
+                    AigNode::Input(_) => self.inputs.insert(id, n.clone()).unwrap_or(n),
+                    AigNode::Latch { .. } => self.latches.insert(id, n.clone()).unwrap_or(n),
                     AigNode::And { fanin0, fanin1, .. } => {
+                        // Trivial cases of strashing
+                        if fanin0.is_cst_false() {
+                            self.strash_repr
+                                .insert(id, Rc::downgrade(&self._node_false));
+                            return Ok(self._node_false.clone());
+                        } else if fanin1.is_cst_false() {
+                            self.strash_repr
+                                .insert(id, Rc::downgrade(&self._node_false));
+                            return Ok(self._node_false.clone());
+                        } else if fanin0.is_cst_true() {
+                            if !fanin1.get_complement() {
+                                self.strash_repr
+                                    .insert(id, Rc::downgrade(&fanin1.get_node()));
+                                return Ok(fanin1.get_node());
+                            } else {
+                                // todo!()
+                            }
+                        } else if fanin1.is_cst_true() {
+                            if !fanin0.get_complement() {
+                                self.strash_repr
+                                    .insert(id, Rc::downgrade(&fanin0.get_node()));
+                                return Ok(fanin0.get_node());
+                            } else {
+                                // todo!()
+                            }
+                        } else if fanin0 == fanin1 {
+                            if !fanin0.get_complement() {
+                                self.strash_repr
+                                    .insert(id, Rc::downgrade(&fanin0.get_node()));
+                                return Ok(fanin0.get_node());
+                            } else {
+                                // todo!()
+                            }
+                        } else if fanin0.is_complement_of(fanin1) {
+                            self.strash_repr
+                                .insert(id, Rc::downgrade(&self._node_false));
+                            return Ok(self._node_false.clone());
+                        }
+
+                        // Existing strashed node
+                        if let Some(weak) = self.strash_map.get(&(fanin0.into(), fanin1.into())) {
+                            self.strash_repr.insert(id, weak.clone());
+                            return Ok(weak.upgrade().unwrap());
+                        }
+
+                        // If we end up here, we are going to create a brand new node
                         fanin0
                             .get_node()
                             .borrow_mut()
@@ -290,19 +363,23 @@ impl Aig {
                             .get_node()
                             .borrow_mut()
                             .add_fanout(id, Rc::downgrade(&n));
+                        n.clone()
                     }
-                    _ => (),
                 };
-                Ok(n)
+
+                // Warning, in case of strashing, id != real_n.id
+                // so we must have early returned at this point.
+                self.nodes.insert(id, Rc::downgrade(&real_n));
+                self.keep_nodes_alive.push(real_n.clone());
+
+                Ok(real_n)
             }
-            // A node was found, maybe it is just the one we're trying to create
-            Some(n) => {
-                if *n.borrow() == node {
-                    Ok(n)
-                } else {
-                    Err(AigError::DuplicateId(id))
-                }
-            }
+            // A node was found, maybe it is just the one we're trying to create,
+            // note that it could also be an AND gate with a different id because of strashing,
+            // in that case we just compare fanins.
+            Some(n) => (*n.borrow() == node || n.borrow().strashable(&node))
+                .then(|| n.clone())
+                .ok_or(AigError::DuplicateId(id)),
         }
     }
 

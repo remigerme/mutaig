@@ -71,8 +71,13 @@ impl Not for AigEdge {
 
 impl PartialEq for AigEdge {
     fn eq(&self, other: &Self) -> bool {
-        self.complement == other.complement
-            && self.node.borrow().get_id() == other.node.borrow().get_id()
+        self.complement == other.complement && self.get_node_id() == other.get_node_id()
+    }
+}
+
+impl Into<(NodeId, bool)> for &AigEdge {
+    fn into(self) -> (NodeId, bool) {
+        (self.get_node_id(), self.get_complement())
     }
 }
 
@@ -91,5 +96,17 @@ impl AigEdge {
 
     pub fn get_complement(&self) -> bool {
         self.complement
+    }
+
+    pub fn is_cst_false(&self) -> bool {
+        self.get_node_id() == 0 && !self.complement
+    }
+
+    pub fn is_cst_true(&self) -> bool {
+        self.get_node_id() == 0 && self.complement
+    }
+
+    pub fn is_complement_of(&self, other: &AigEdge) -> bool {
+        self.get_node_id() == other.get_node_id() && self.get_complement() ^ other.get_complement()
     }
 }
