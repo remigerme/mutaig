@@ -22,7 +22,11 @@
 //! [`Miter::merge`]: crate::miter::Miter::merge
 //! [`Miter::mergeable`]: crate::miter::Miter::mergeable
 
-use std::{collections::HashMap, num::TryFromIntError, ops::Not};
+use std::{
+    collections::{HashMap, HashSet},
+    num::TryFromIntError,
+    ops::Not,
+};
 
 use crate::{AigEdge, AigNode, NodeId, Result, miter::MiterError};
 
@@ -158,8 +162,22 @@ impl Cnf {
         Cnf(Vec::new())
     }
 
+    /// Returns the number of clauses.
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    /// Returns the number of variables used in the CNF.
+    pub fn n_vars(&self) -> usize {
+        let mut vars = HashSet::new();
+
+        for clause in &self.0 {
+            for lit in &clause.0 {
+                vars.insert(lit.0.abs());
+            }
+        }
+
+        vars.len()
     }
 
     pub fn get_clauses(&self) -> Vec<Clause> {
